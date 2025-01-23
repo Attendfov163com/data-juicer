@@ -4,7 +4,7 @@ English | [中文页面](DJ_SORA_ZH.md)
 
 Data is the key to the unprecedented development of large multi-modal models such as SORA. How to obtain and process data efficiently and scientifically faces new challenges! DJ-SORA aims to create a series of large-scale, high-quality open-source multi-modal data sets to assist the open-source community in data understanding and model training.
 
-DJ-SORA is based on Data-Juicer (including hundreds of dedicated video, image, audio, text and other multi-modal data processing [operators](Operators_ZH.md) and tools) to form a series of systematic and reusable Multimodal "data recipes" for analyzing, cleaning, and generating large-scale, high-quality multimodal data.
+DJ-SORA is based on Data-Juicer (including hundreds of dedicated video, image, audio, text and other multi-modal data processing [operators](Operators.md) and tools) to form a series of systematic and reusable Multimodal "data recipes" for analyzing, cleaning, and generating large-scale, high-quality multimodal data.
 
 This project is being actively updated and maintained. We eagerly invite you to participate and jointly create a more open and higher-quality multi-modal data ecosystem to unleash the unlimited potential of large models!
 
@@ -109,6 +109,6 @@ This project is being actively updated and maintained. We eagerly invite you to 
     - ...
   - [✅] (Model-Data sandbox) With relatively small models and the DJ-SORA dataset, exploring low-cost, transferable, and instructive data-model co-design, configurations and checkpoints. 
   - [ ] [WIP] Training SORA-like models with DJ-SORA data on  larger scales and in more scenarios to improve model performance.
-    - [✅] Data-Juicer-T2v, [V-Bench Top1 model](https://huggingface.co/datajuicer/Data-Juicer-T2V-v2). Please refer [here](./Sandbox.md) for more details.
+    - [✅] Data-Juicer-T2V, [V-Bench Top1 model](https://huggingface.co/datajuicer/Data-Juicer-T2V-v2). Please refer [here](./Sandbox.md) for more details.
     - ...
   - ...

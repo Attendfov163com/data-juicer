@@ -1,9 +1,10 @@
 import base64
 import datetime
+import io
 import os
 import re
 import shutil
-from typing import List, Optional, Union
+from typing import List, Optional, Tuple, Union
 
 import av
 import numpy as np
@@ -13,6 +14,9 @@ from pydantic import PositiveInt
 
 from data_juicer.utils.constant import DEFAULT_PREFIX, Fields
 from data_juicer.utils.file_utils import add_suffix_to_filename
+from data_juicer.utils.lazy_loader import LazyLoader
+
+cv2 = LazyLoader('cv2', 'cv2')
 
 # suppress most warnings from av
 av.logging.set_level(av.logging.PANIC)
@@ -129,8 +133,6 @@ def pil_to_opencv(pil_image):
 
 
 def detect_faces(image, detector, **extra_kwargs):
-    import cv2
-
     img = pil_to_opencv(image)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     dets = detector.detectMultiScale(gray, **extra_kwargs)
@@ -161,6 +163,58 @@ def iou(box1, box2):
     intersection = max(0, (ix_max - ix_min) * (iy_max - iy_min))
     union = area1 + area2 - intersection
     return 1.0 * intersection / union
+
+
+def calculate_resized_dimensions(
+        original_size: Tuple[PositiveInt, PositiveInt],
+        target_size: Union[PositiveInt, Tuple[PositiveInt, PositiveInt]],
+        max_length: Optional[int] = None,
+        divisible: PositiveInt = 1) -> Tuple[int, int]:
+    """
+    Resize dimensions based on specified constraints.
+
+    :param original_size: The original dimensions as (height, width).
+    :param target_size: Desired target size; can be a single integer
+        (short edge) or a tuple (height, width).
+    :param max_length: Maximum allowed length for the longer edge.
+    :param divisible: The number that the dimensions must be divisible by.
+    :return: Resized dimensions as (height, width).
+    """
+
+    height, width = original_size
+    short_edge, long_edge = sorted((width, height))
+
+    # Normalize target_size to a tuple
+    if isinstance(target_size, int):
+        target_size = (target_size, )
+
+    # Initialize new dimensions
+    if target_size:
+        if len(target_size) == 1:  # Only the smaller edge is specified
+            new_short_edge = target_size[0]
+            new_long_edge = int(new_short_edge * long_edge / short_edge)
+        else:  # Both dimensions are specified
+            new_short_edge = min(target_size)
+            new_long_edge = max(target_size)
+    else:  # No change
+        new_short_edge, new_long_edge = short_edge, long_edge
+
+    # Enforce maximum length constraint
+    if max_length is not None and new_long_edge > max_length:
+        scaling_factor = max_length / new_long_edge
+        new_short_edge = int(new_short_edge * scaling_factor)
+        new_long_edge = max_length
+
+    # Determine final dimensions based on original orientation
+    resized_dimensions = ((new_short_edge,
+                           new_long_edge) if width <= height else
+                          (new_long_edge, new_short_edge))
+
+    # Ensure final dimensions are divisible by the specified value
+    resized_dimensions = tuple(
+        int(dim / divisible) * divisible for dim in resized_dimensions)
+
+    return resized_dimensions
 
 
 # Audios
@@ -268,14 +322,17 @@ def cut_video_by_seconds(
         container = input_video
 
     # create the output video
-    output_container = load_video(output_video, 'w')
+    if output_video:
+        output_container = load_video(output_video, 'w')
+    else:
+        output_buffer = io.BytesIO()
+        output_container = av.open(output_buffer, mode='w', format='mp4')
 
     # add the video stream into the output video according to input video
     input_video_stream = container.streams.video[0]
     codec_name = input_video_stream.codec_context.name
     fps = input_video_stream.base_rate
-    output_video_stream = output_container.add_stream(codec_name,
-                                                      rate=str(fps))
+    output_video_stream = output_container.add_stream(codec_name, rate=fps)
     output_video_stream.width = input_video_stream.codec_context.width
     output_video_stream.height = input_video_stream.codec_context.height
     output_video_stream.pix_fmt = input_video_stream.codec_context.pix_fmt
@@ -338,6 +395,11 @@ def cut_video_by_seconds(
     if isinstance(input_video, str):
         close_video(container)
     close_video(output_container)
+
+    if not output_video:
+        output_buffer.seek(0)
+        return output_buffer
+
     if not os.path.exists(output_video):
         logger.warning(f'This video could not be successfully cut in '
                        f'[{start_seconds}, {end_seconds}] seconds. '
@@ -378,8 +440,7 @@ def process_each_frame(input_video: Union[str, av.container.InputContainer],
 
         codec_name = input_video_stream.codec_context.name
         fps = input_video_stream.base_rate
-        output_video_stream = output_container.add_stream(codec_name,
-                                                          rate=str(fps))
+        output_video_stream = output_container.add_stream(codec_name, rate=fps)
         output_video_stream.pix_fmt = input_video_stream.codec_context.pix_fmt
         output_video_stream.width = input_video_stream.codec_context.width
         output_video_stream.height = input_video_stream.codec_context.height
@@ -410,6 +471,39 @@ def process_each_frame(input_video: Union[str, av.container.InputContainer],
         shutil.rmtree(output_video, ignore_errors=True)
         return (input_video
                 if isinstance(input_video, str) else input_video.name)
+
+
+def extract_key_frames_by_seconds(
+        input_video: Union[str, av.container.InputContainer],
+        duration: float = 1):
+    """Extract key frames by seconds.
+        :param input_video: input video path or av.container.InputContainer.
+        :param duration: duration of each video split in seconds.
+    """
+    # load the input video
+    if isinstance(input_video, str):
+        container = load_video(input_video)
+    elif isinstance(input_video, av.container.InputContainer):
+        container = input_video
+    else:
+        raise ValueError(f'Unsupported type of input_video. Should be one of '
+                         f'[str, av.container.InputContainer], but given '
+                         f'[{type(input_video)}].')
+
+    video_duration = get_video_duration(container)
+    timestamps = np.arange(0, video_duration, duration).tolist()
+
+    all_key_frames = []
+    for i in range(1, len(timestamps)):
+        output_buffer = cut_video_by_seconds(container, None,
+                                             timestamps[i - 1], timestamps[i])
+        if output_buffer:
+            cut_inp_container = av.open(output_buffer, format='mp4', mode='r')
+            key_frames = extract_key_frames(cut_inp_container)
+            all_key_frames.extend(key_frames)
+            close_video(cut_inp_container)
+
+    return all_key_frames
 
 
 def extract_key_frames(input_video: Union[str, av.container.InputContainer]):
@@ -463,6 +557,43 @@ def get_key_frame_seconds(input_video: Union[str,
     ts = [float(f.pts * f.time_base) for f in key_frames]
     ts.sort()
     return ts
+
+
+def extract_video_frames_uniformly_by_seconds(
+        input_video: Union[str, av.container.InputContainer],
+        frame_num: PositiveInt,
+        duration: float = 1):
+    """Extract video frames uniformly by seconds.
+        :param input_video: input video path or av.container.InputContainer.
+        :param frame_num: the number of frames to be extracted uniformly from
+            each video split by duration.
+        :param duration: duration of each video split in seconds.
+    """
+    # load the input video
+    if isinstance(input_video, str):
+        container = load_video(input_video)
+    elif isinstance(input_video, av.container.InputContainer):
+        container = input_video
+    else:
+        raise ValueError(f'Unsupported type of input_video. Should be one of '
+                         f'[str, av.container.InputContainer], but given '
+                         f'[{type(input_video)}].')
+
+    video_duration = get_video_duration(container)
+    timestamps = np.arange(0, video_duration, duration).tolist()
+
+    all_frames = []
+    for i in range(1, len(timestamps)):
+        output_buffer = cut_video_by_seconds(container, None,
+                                             timestamps[i - 1], timestamps[i])
+        if output_buffer:
+            cut_inp_container = av.open(output_buffer, format='mp4', mode='r')
+            key_frames = extract_video_frames_uniformly(cut_inp_container,
+                                                        frame_num=frame_num)
+            all_frames.extend(key_frames)
+            close_video(cut_inp_container)
+
+    return all_frames
 
 
 def extract_video_frames_uniformly(
@@ -546,13 +677,18 @@ def extract_video_frames_uniformly(
             container.seek(0)
             search_idx = 0
             curr_pts = second_group[search_idx] / time_base
+            find_all = False
             for frame in container.decode(input_video_stream):
                 if frame.pts >= curr_pts:
                     extracted_frames.append(frame)
                     search_idx += 1
                     if search_idx >= len(second_group):
+                        find_all = True
                         break
                     curr_pts = second_group[search_idx] / time_base
+            if not find_all and frame is not None:
+                # add the last frame
+                extracted_frames.append(frame)
         else:
             # search from a key frame
             container.seek(int(key_frame_second * 1e6))
@@ -802,7 +938,6 @@ def parse_string_to_roi(roi_string, roi_type='pixel'):
             'format of "x1, y1, x2, y2", "(x1, y1, x2, y2)", or '
             '"[x1, y1, x2, y2]".')
         return None
-    return None
 
 
 def close_video(container: av.container.InputContainer):

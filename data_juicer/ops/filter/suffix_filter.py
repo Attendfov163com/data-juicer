@@ -2,10 +2,13 @@ from typing import List, Union
 
 from data_juicer.utils.constant import Fields
 
-from ..base_op import OPERATORS, Filter
+from ..base_op import NON_STATS_FILTERS, OPERATORS, Filter
+
+OP_NAME = 'suffix_filter'
 
 
-@OPERATORS.register_module('suffix_filter')
+@NON_STATS_FILTERS.register_module(OP_NAME)
+@OPERATORS.register_module(OP_NAME)
 class SuffixFilter(Filter):
     """Filter to keep samples with specified suffix."""
 
@@ -26,10 +29,10 @@ class SuffixFilter(Filter):
         else:
             self.suffixes = suffixes
 
-    def compute_stats(self, sample):
+    def compute_stats_single(self, sample):
         return sample
 
-    def process(self, sample):
+    def process_single(self, sample):
         if self.suffixes:
             if sample[Fields.suffix] in self.suffixes:
                 return True

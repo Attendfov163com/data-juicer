@@ -1,6 +1,6 @@
 torch>=1.11.0
 torchaudio
-easyocr
+easyocr==1.7.1
 fasttext-wheel
 kenlm
 sentencepiece
@@ -11,7 +11,7 @@ selectolax
 nlpaug
 nlpcda
 nltk<3.9
-transformers>=4.37
+transformers>=4.47.0,<4.48.0
 transformers_stream_generator
 einops
 accelerate
@@ -24,4 +24,8 @@ simple-aesthetics-predictor
 scenedetect[opencv]
 ffmpeg-python
 opencv-python
-vllm
+vllm>=0.6.5
+rouge
+dashscope
+openai
+ultralytics

@@ -4,7 +4,7 @@
 
 数据是SORA等前沿大模型的关键，如何高效科学地获取和处理数据面临新的挑战！DJ-SORA旨在创建一系列大规模高质量开源多模态数据集，助力开源社区数据理解和模型训练。
 
-DJ-SORA将基于Data-Juicer(包含上百个专用的视频、图像、音频、文本等多模态数据处理[算子](Operators_ZH.md)及工具)，形成一系列系统化可复用的多模态“数据菜谱”，用于分析、清洗及生成大规模高质量多模态数据。
+DJ-SORA将基于Data-Juicer(包含上百个专用的视频、图像、音频、文本等多模态数据处理[算子](Operators.md)及工具)，形成一系列系统化可复用的多模态“数据菜谱”，用于分析、清洗及生成大规模高质量多模态数据。
 
 本项目正在积极更新和维护中，我们热切地邀请您参与，共同打造一个更开放、更高质的多模态数据生态系统，激发大模型无限潜能！
 
@@ -113,7 +113,5 @@ DJ-SORA将基于Data-Juicer(包含上百个专用的视频、图像、音频、�
     - ...
   - [✅] (Model-Data sandbox) 在相对小的模型和DJ-SORA数据集上，探索形成低开销、可迁移、有指导性的data-model co-design、配置及检查点
   - [ ] [WIP] 更大规模、更多场景使用DJ-SORA数据训练类SORA模型，提高模型性能
-    - [✅] Data-Juicer-T2v, [V-Bench Top1 model](https://huggingface.co/datajuicer/Data-Juicer-T2V-v2)。详情请参考[这里](./Sandbox-ZH.md)。
+    - [✅] Data-Juicer-T2V, [V-Bench Top1 model](https://huggingface.co/datajuicer/Data-Juicer-T2V-v2)。详情请参考[这里](./Sandbox-ZH.md)。
     - ...
-
-

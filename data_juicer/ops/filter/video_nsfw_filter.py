@@ -1,8 +1,8 @@
 import numpy as np
 from pydantic import PositiveInt
 
-from data_juicer.utils.availability_utils import AvailabilityChecking
 from data_juicer.utils.constant import Fields, StatsKeys
+from data_juicer.utils.lazy_loader import LazyLoader
 from data_juicer.utils.mm_utils import (close_video, extract_key_frames,
                                         extract_video_frames_uniformly,
                                         load_data_with_context, load_video)
@@ -11,15 +11,9 @@ from data_juicer.utils.model_utils import get_model, prepare_model
 from ..base_op import OPERATORS, Filter
 from ..op_fusion import INTER_SAMPLED_FRAMES, LOADED_VIDEOS
 
+torch = LazyLoader('torch', 'torch')
+
 OP_NAME = 'video_nsfw_filter'
-
-with AvailabilityChecking(['torch', 'transformers'], OP_NAME):
-
-    import torch
-    import transformers  # noqa: F401
-
-    # avoid hanging when calling nsfw detection in multiprocessing
-    torch.set_num_threads(1)
 
 
 @OPERATORS.register_module(OP_NAME)
@@ -71,6 +65,7 @@ class VideoNSFWFilter(Filter):
         :param args: extra args
         :param kwargs: extra args
         """
+        kwargs.setdefault('mem_required', '1GB')
         super().__init__(*args, **kwargs)
         self.score_threshold = score_threshold
         if frame_sampling_method not in ['all_keyframes', 'uniform']:
@@ -97,7 +92,7 @@ class VideoNSFWFilter(Filter):
             ('' if frame_sampling_method == 'all_keyframes'
              else f'-{frame_num}')
 
-    def compute_stats(self, sample, rank=None, context=False):
+    def compute_stats_single(self, sample, rank=None, context=False):
         # check if it's computed already
         if StatsKeys.video_nsfw_score in sample[Fields.stats]:
             return sample
@@ -167,7 +162,7 @@ class VideoNSFWFilter(Filter):
 
         return sample
 
-    def process(self, sample, rank=None):
+    def process_single(self, sample, rank=None):
         itm_scores = sample[Fields.stats][StatsKeys.video_nsfw_score]
         if len(itm_scores) <= 0:
             return True

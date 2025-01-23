@@ -1,6 +1,5 @@
 import asyncio
 import copy
-import hashlib
 import os
 import re
 import shutil
@@ -10,6 +9,7 @@ from typing import AsyncGenerator, List, Union
 
 from datasets.utils.extract import ZstdExtractor as Extractor
 
+from data_juicer.utils.common_utils import dict_to_hash
 from data_juicer.utils.constant import DEFAULT_PREFIX, Fields
 
 
@@ -127,28 +127,13 @@ def add_suffix_to_filename(filename, suffix):
     return new_name
 
 
-def dict_to_hash(input_dict, hash_length=None):
-    """
-        hash a dict to a string with length hash_length
-
-        :param input_dict: the given dict
-    """
-    sorted_items = sorted(input_dict.items())
-    dict_string = str(sorted_items).encode()
-    hasher = hashlib.sha256()
-    hasher.update(dict_string)
-    hash_value = hasher.hexdigest()
-    if hash_length:
-        hash_value = hash_value[:hash_length]
-    return hash_value
-
-
 def create_directory_if_not_exists(directory_path):
     """
         create a directory if not exists, this function is process safe
 
         :param directory_path: directory path to be create
     """
+    directory_path = os.path.abspath(directory_path)
     try:
         os.makedirs(directory_path, exist_ok=True)
     except FileExistsError:

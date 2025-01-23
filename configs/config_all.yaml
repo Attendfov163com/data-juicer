@@ -13,17 +13,22 @@ np: 4                                                       # number of subproce
 text_keys: 'text'                                           # the key name of field where the sample texts to be processed, e.g., `text`, `instruction`, `output`, ...
                                                             # Note: currently, we support specify only ONE key for each op, for cases requiring multiple keys, users can specify the op multiple times. We will only use the first key of `text_keys` when you set multiple keys.
 suffixes: []                                                # the suffix of files that will be read. For example: '.txt', 'txt' or ['txt', '.pdf', 'docx']
+turbo: false                                                # Enable Turbo mode to maximize processing speed when batch size is 1.
+skip_op_error: true                                         # Skip errors in OPs caused by unexpected invalid samples.
 use_cache: true                                             # whether to use the cache management of Hugging Face datasets. It might take up lots of disk space when using cache
 ds_cache_dir: null                                          # cache dir for Hugging Face datasets. In default, it\'s the same as the environment variable `HF_DATASETS_CACHE`, whose default value is usually "~/.cache/huggingface/datasets". If this argument is set to a valid path by users, it will override the default cache dir
+open_monitor: true                                          # Whether to open the monitor to trace resource utilization for each OP during data processing. It\'s True in default.
 use_checkpoint: false                                       # whether to use the checkpoint management to save the latest version of dataset to work dir when processing. Rerun the same config will reload the checkpoint and skip ops before it. Cache will be disabled when using checkpoint. If args of ops before the checkpoint are changed, all ops will be rerun from the beginning.
 temp_dir: null                                              # the path to the temp directory to store intermediate caches when cache is disabled, these cache files will be removed on-the-fly. In default, it's None, so the temp dir will be specified by system. NOTICE: you should be caution when setting this argument because it might cause unexpected program behaviors when this path is set to an unsafe directory.
 open_tracer: false                                          # whether to open the tracer to trace the changes during process. It might take more time when opening tracer
 op_list_to_trace: []                                        # only ops in this list will be traced by tracer. If it's empty, all ops will be traced. Only available when tracer is opened.
 trace_num: 10                                               # number of samples to show the differences between datasets before and after each op. Only available when tracer is opened.
 op_fusion: false                                            # whether to fuse operators that share the same intermediate variables automatically. Op fusion might reduce the memory requirements slightly but speed up the whole process.
+fusion_strategy: 'probe'                                    # OP fusion strategy. Support ['greedy', 'probe'] now. 'greedy' means keep the basic OP order and put the fused OP to the last of each fused OP group. 'probe' means Data-Juicer will probe the running speed for each OP at the beginning and reorder the OPs and fused OPs according to their probed speed (fast to slow). It's 'probe' in default.
 cache_compress: null                                        # the compression method of the cache file, which can be specified in ['gzip', 'zstd', 'lz4']. If this parameter is None, the cache file will not be compressed. We recommend you turn on this argument when your input dataset is larger than tens of GB and your disk space is not enough.
 keep_stats_in_res_ds: false                                 # whether to keep the computed stats in the result dataset. The intermediate fields to store the stats computed by Filters will be removed if it's False. It's False in default.
 keep_hashes_in_res_ds: false                                # whether to keep the computed hashes in the result dataset. The intermediate fields to store the hashes computed by Deduplicators will be removed if it's False. It's False in default.
+adaptive_batch_size: false                                  # whether to use adaptive batch sizes for each OP according to the probed results. It's False in default.
 
 # for multimodal data processing
 image_key: 'images'                                         # key name of field to store the list of sample image paths.
@@ -53,6 +58,20 @@ hpo_config: null                                            # path to a configur
 process:
   # Mapper ops. Most of these ops need no arguments.
   - audio_ffmpeg_wrapped_mapper:                            # simple wrapper for FFmpeg audio filters
+  - calibrate_qa_mapper:                                    # calibrate question-answer pairs based on reference text.
+      api_model: 'gpt-4o'                                     # API model name.
+      api_endpoint: null                                      # URL endpoint for the API.
+      response_path: null                                     # Path to extract content from the API response. Defaults to 'choices.0.message.content'.
+      system_prompt: null                                     # System prompt for the calibration task.
+      input_template: null                                    # Template for building the model input.
+      reference_template: null                                # Template for formatting the reference text.
+      qa_pair_template: null                                  # Template for formatting question-answer pairs.
+      output_pattern: null                                    # Regular expression for parsing model output.
+      try_num: 3                                              # The number of retry attempts when there is an API call error or output parsing error.
+      model_params: {}                                        # Parameters for initializing the model.
+      sampling_params: {}                                     # Extra parameters passed to the API call.
+  - calibrate_query_mapper:                                 # calibrate query in question-answer pairs based on reference text.
+  - calibrate_response_mapper:                              # calibrate response in question-answer pairs based on reference text.
   - chinese_convert_mapper:                                 # convert Chinese between Traditional Chinese, Simplified Chinese and Japanese Kanji.
       mode: 's2t'                                             # choose the mode to convert Chinese: ['s2t', 't2s', 's2tw', 'tw2s', 's2hk', 'hk2s', 's2twp', 'tw2sp', 't2tw', 'tw2t', 'hk2t', 't2hk', 't2jp', 'jp2t']
   - clean_email_mapper:                                     # remove emails from text.
@@ -60,31 +79,191 @@ process:
   - clean_ip_mapper:                                        # remove ip addresses from text.
   - clean_links_mapper:                                     # remove web links from text.
   - clean_copyright_mapper:                                 # remove copyright comments.
+  - dialog_intent_detection_mapper:                         # Mapper to generate user's intent labels in dialog.
+      api_model: 'gpt-4o'                                     # API model name.
+      intent_candidates: null                                 # The output intent candidates. Use open-domai intent labels n if it is None.
+      max_round: 10                                           # The max num of round in the dialog to build the prompt.
+      labels_key: 'dialog_intent_labels'                      # The key name in the meta field to store the output labels. It is 'dialog_intent_labels' in default.
+      analysis_key: 'dialog_intent_labels_analysis'           # The key name in the meta field to store the corresponding analysis. It is 'dialog_intent_labels_analysis' in default.
+      api_endpoint: null                                      # URL endpoint for the API.
+      response_path: null                                     # Path to extract content from the API response. Defaults to 'choices.0.message.content'.
+      system_prompt: null                                     # System prompt for the task.
+      query_template: null                                    # Template for query part to build the input prompt.
+      response_template: null                                 # Template for response part to build the input prompt.
+      candidate_template: null                                # Template for intent candidates to build the input prompt.
+      analysis_template: null                                 # Template for analysis part to build the input prompt.
+      labels_template: null                                   # Template for labels to build the input prompt.
+      analysis_pattern: null                                  # Pattern to parse the return intent analysis.
+      labels_pattern: null                                    # Pattern to parse the return intent labels.
+      try_num: 3                                              # The number of retry attempts when there is an API call error or output parsing error.
+      model_params: {}                                        # Parameters for initializing the API model.
+      sampling_params: {}                                     # Extra parameters passed to the API call. e.g {'temperature': 0.9, 'top_p': 0.95}
+  - dialog_sentiment_detection_mapper:                      # Mapper to generate user's sentiment labels in dialog.
+      api_model: 'gpt-4o'                                     # API model name.
+      sentiment_candidates: null                              # The output sentiment candidates. Use open-domai sentiment labels n if it is None.
+      max_round: 10                                           # The max num of round in the dialog to build the prompt.
+      labels_key: 'dialog_sentiment_labels'                   # The key name in the meta field to store the output labels. It is 'dialog_sentiment_labels' in default.
+      analysis_key: 'dialog_sentiment_labels_analysis'        # The key name in the meta field to store the corresponding analysis. It is 'dialog_sentiment_labels_analysis' in default.
+      api_endpoint: null                                      # URL endpoint for the API.
+      response_path: null                                     # Path to extract content from the API response. Defaults to 'choices.0.message.content'.
+      system_prompt: null                                     # System prompt for the task.
+      query_template: null                                    # Template for query part to build the input prompt.
+      response_template: null                                 # Template for response part to build the input prompt.
+      candidate_template: null                                # Template for sentiment candidates to build the input prompt.
+      analysis_template: null                                 # Template for analysis part to build the input prompt.
+      labels_template: null                                   # Template for labels part to build the input prompt.
+      analysis_pattern: null                                  # Pattern to parse the return sentiment analysis.
+      labels_pattern: null                                    # Pattern to parse the return sentiment labels.
+      try_num: 3                                              # The number of retry attempts when there is an API call error or output parsing error.
+      model_params: {}                                        # Parameters for initializing the API model.
+      sampling_params: {}                                     # Extra parameters passed to the API call. e.g {'temperature': 0.9, 'top_p': 0.95}
+  - dialog_sentiment_intensity_mapper:                      # Mapper to predict user's sentiment intensity (from -5 to 5 in default prompt) in dialog.
+      api_model: 'gpt-4o'                                     # API model name.
+      max_round: 10                                           # The max num of round in the dialog to build the prompt.
+      intensities_key: null                                   # The key name in the meta field to store the output sentiment intensities. It is 'dialog_sentiment_intensity' in default.
+      analysis_key: null                                      # The key name in the meta field to store the corresponding analysis. It is 'dialog_sentiment_intensity_analysis' in default.
+      api_endpoint: null                                      # URL endpoint for the API.
+      response_path: null                                     # Path to extract content from the API response. Defaults to 'choices.0.message.content'.
+      system_prompt: null                                     # System prompt for the task.
+      query_template: null                                    # Template for query part to build the input prompt.
+      response_template: null                                 # Template for response part to build the input prompt.
+      analysis_template: null                                 # Template for analysis part to build the input prompt.
+      intensity_template: null                                # Template for intensity part to build the input prompt.
+      analysis_pattern: null                                  # Pattern to parse the return sentiment analysis.
+      intensity_pattern: null                                 # Pattern to parse the return sentiment intensity.
+      try_num: 3                                              # The number of retry attempts when there is an API call error or output parsing error.
+      model_params: {}                                        # Parameters for initializing the API model.
+      sampling_params: {}                                     # Extra parameters passed to the API call. e.g {'temperature': 0.9, 'top_p': 0.95}
+  - dialog_topic_detection_mapper:                          # Mapper to generate user's topic labels in dialog.
+      api_model: 'gpt-4o'                                     # API model name.
+      topic_candidates: null                                  # The output topic candidates. Use open-domai topic labels n if it is None.
+      max_round: 10                                           # The max num of round in the dialog to build the prompt.
+      labels_key: 'dialog_topic_labels'                       # The key name in the meta field to store the output labels. It is 'dialog_topic_labels' in default.
+      analysis_key: 'dialog_topic_labels_analysis'            # The key name in the meta field to store the corresponding analysis. It is 'dialog_topic_labels_analysis' in default.
+      api_endpoint: null                                      # URL endpoint for the API.
+      response_path: null                                     # Path to extract content from the API response. Defaults to 'choices.0.message.content'.
+      system_prompt: null                                     # System prompt for the task.
+      query_template: null                                    # Template for query part to build the input prompt.
+      response_template: null                                 # Template for response part to build the input prompt.
+      candidate_template: null                                # Template for topic candidates to build the input prompt.
+      analysis_template: null                                 # Template for analysis part to build the input prompt.
+      labels_template: null                                   # Template for labels part to build the input prompt.
+      analysis_pattern: null                                  # Pattern to parse the return topic analysis.
+      labels_pattern: null                                    # Pattern to parse the return topic labels.
+      try_num: 3                                              # The number of retry attempts when there is an API call error or output parsing error.
+      model_params: {}                                        # Parameters for initializing the API model.
+      sampling_params: {}                                     # Extra parameters passed to the API call. e.g {'temperature': 0.9, 'top_p': 0.95}
   - expand_macro_mapper:                                    # expand macro definitions in Latex text.
-  - extract_qa_mapper:                                      # mapper to extract question and answer pair from text.
-      hf_model: 'alibaba-pai/pai-qwen1_5-7b-doc2qa'           # model name on huggingface to extract question and answer pair.
-      pattern: null                                           # regular expression pattern to search for within text.
-      qa_format: 'chatml'                                     # Output format of question and answer pair.
-      enable_vllm: true                                       # Whether to use vllm for inference acceleration.
-      tensor_parallel_size: null                              # It is only valid when enable_vllm is True. The number of GPUs to use for distributed execution with tensor parallelism.
-      max_model_len: null                                     # It is only valid when enable_vllm is True. Model context length. If unspecified, will be automatically derived from the model config.
-      max_num_seqs: 256                                       # It is only valid when enable_vllm is True. Maximum number of sequences to be processed in a single iteration.
-      sampling_params: {}                                     # Sampling parameters for text generation. e.g {'temperature': 0.9, 'top_p': 0.95}
+  - extract_entity_attribute_mapper:                        # Extract attributes for given entities from the text.
+      api_model: 'gpt-4o'                                     # API model name.
+      query_entities: ["孙悟空", "猪八戒"]                      # Entity list to be queried.
+      query_attributes: ["人物性格"]                            # Attribute list to be queried.
+      entity_key: 'entity'                                    # The key name in the meta field to store the given main entity for attribute extraction.
+      entity_attribute_key: 'attribute'                       # The key name in the meta field to store the given attribute to be extracted.
+      attribute_desc_key: 'attribute_description'             # The key name in the meta field to store the extracted attribute description.
+      support_text_key: 'support_text'                        # The key name in the meta field to store the attribute support text extracted from the raw text.
+      api_endpoint: null                                      # URL endpoint for the API.
+      response_path: null                                     # Path to extract content from the API response. Defaults to 'choices.0.message.content'.
+      system_prompt_template: null                            # System prompt template for the task. Need to be specified by given entity and attribute.
+      input_template: null                                    # Template for building the model input.
+      attr_pattern_template: null                             # Pattern for parsing the attribute from output. Need to be specified by given attribute.
+      demo_pattern: null                                      # Pattern for parsing the demonstraction from output to support the attribute.
+      try_num: 3                                              # The number of retry attempts when there is an API call error or output parsing error.
+      drop_text: false                                        # If drop the text in the output.
+      model_params: {}                                        # Parameters for initializing the API model.
+      sampling_params: {}                                     # Extra parameters passed to the API call. e.g {'temperature': 0.9, 'top_p': 0.95}
+  - extract_entity_relation_mapper:                         # Extract entities and relations in the text for knowledge graph.
+      api_model: 'gpt-4o'                                     # API model name.
+      entity_types: ['person', 'organization', 'location']    # Pre-defined entity types for knowledge graph.
+      entity_key: 'entity'                                    # The key name in the meta field to store the entities.
+      relation_key: 'relation'                                # The key name in the meta field to store the relations between entities.
+      api_endpoint: null                                      # URL endpoint for the API.
+      response_path: null                                     # Path to extract content from the API response. Defaults to 'choices.0.message.content'.
+      prompt_template: null                                   # The template of input prompt.
+      tuple_delimiter: null                                   # Delimiter to separate items in outputs.
+      record_delimiter: null                                  # Delimiter to separate records in outputs.
+      completion_delimiter: null                              # To mark the end of the output.
+      max_gleaning: 1                                         # the extra max num to call LLM to glean entities and relations.
+      continue_prompt: null                                   # the prompt for gleaning entities and relations.
+      if_loop_prompt: null                                    # the prompt to determine whether to stop gleaning.
+      entity_pattern: null                                    # Regular expression for parsing entity record.
+      relation_pattern: null                                  # Regular expression for parsing relation record.
+      try_num: 3                                              # The number of retry attempts when there is an API call error or output parsing error.
+      drop_text: false                                        # If drop the text in the output.
+      model_params: {}                                        # Parameters for initializing the API model.
+      sampling_params: {}                                     # Extra parameters passed to the API call. e.g {'temperature': 0.9, 'top_p': 0.95}
+  - extract_event_mapper:                                   # Extract events and relevant characters in the text
+      api_model: 'gpt-4o'                                     # API model name.
+      event_desc_key: 'event_description'                     # The key name in the meta field to store the event descriptions.
+      relevant_char_key: 'relevant_characters'                # The key name in the meta field to store the relevant characters to the events.
+      api_endpoint: null                                      # URL endpoint for the API.
+      response_path: null                                     # Path to extract content from the API response. Defaults to 'choices.0.message.content'.
+      system_prompt: null                                     # System prompt for the task.
+      input_template: null                                    # Template for building the model input.
+      output_pattern: null                                    # Regular expression for parsing model output.
+      try_num: 3                                              # The number of retry attempts when there is an API call error or output parsing error.
+      drop_text: false                                        # If drop the text in the output.
+      model_params: {}                                        # Parameters for initializing the API model.
+      sampling_params: {}                                     # Extra parameters passed to the API call. e.g {'temperature': 0.9, 'top_p': 0.95}
+  - extract_keyword_mapper:                                 # Generate keywords for the text.
+      api_model: 'gpt-4o'                                     # API model name.
+      keyword_key: 'keyword'                                  # The key name in the meta field to store the keywords.
+      api_endpoint: null                                      # URL endpoint for the API.
+      response_path: null                                     # Path to extract content from the API response. Defaults to 'choices.0.message.content'.
+      prompt_template: null                                   # The template of input prompt.
+      completion_delimiter: null                              # To mark the end of the output.
+      output_pattern: null                                    # Regular expression for parsing keywords.
+      try_num: 3                                              # The number of retry attempts when there is an API call error or output parsing error.
+      drop_text: false                                        # If drop the text in the output.
+      model_params: {}                                        # Parameters for initializing the API model.
+      sampling_params: {}                                     # Extra parameters passed to the API call. e.g {'temperature': 0.9, 'top_p': 0.95}
+  - extract_nickname_mapper:                                # Extract nickname relationship in the text.
+      api_model: 'gpt-4o'                                     # API model name.
+      nickname_key: 'nickname'                                # The key name in the meta field to store the nickname relationship.
+      api_endpoint: null                                      # URL endpoint for the API.
+      response_path: null                                     # Path to extract content from the API response. Defaults to 'choices.0.message.content'.
+      system_prompt: null                                     # System prompt for the task.
+      input_template: null                                    # Template for building the model input.
+      output_pattern: null                                    # Regular expression for parsing model output.
+      try_num: 3                                              # The number of retry attempts when there is an API call error or output parsing error.
+      drop_text: false                                        # If drop the text in the output.
+      model_params: {}                                        # Parameters for initializing the API model.
+      sampling_params: {}                                     # Extra parameters passed to the API call. e.g {'temperature': 0.9, 'top_p': 0.95}
+  - extract_support_text_mapper:                            # extract support sub text for a summary.
+      api_model: 'gpt-4o'                                     # API model name.
+      summary_key: 'event_description'                        # The key name in the meta field to store the input summary. It's "event_description" in default.
+      support_text_key: 'support_text'                        # The key name in the meta field to store the output support text for the summary. It's "support_text" in default.
+      api_endpoint: null                                      # URL endpoint for the API.
+      response_path: null                                     # Path to extract content from the API response. Defaults to 'choices.0.message.content'.
+      system_prompt: null                                     # System prompt for the task.
+      input_template: null                                    # Template for building the model input.
+      try_num: 3                                              # The number of retry attempts when there is an API call error or output parsing error.
+      drop_text: false                                        # If drop the text in the output.
+      model_params: {}                                        # Parameters for initializing the API model.
+      sampling_params: {}                                     # Extra parameters passed to the API call. e.g {'temperature': 0.9, 'top_p': 0.95}
   - fix_unicode_mapper:                                     # fix unicode errors in text.
-  - generate_instruction_mapper:                            # generate new instruction text data.
-      hf_model: 'Qwen/Qwen-7B-Chat'                           # model name on huggingface to generate instruction.
-      seed_file: 'demos/data/demo-dataset-chatml.jsonl'       # Seed file as instruction samples to generate new instructions, chatml format.
-      instruct_num: 3                                         # the number of generated samples.
-      similarity_threshold: 0.7                               # the similarity score threshold between the generated samples and the seed samples.Range from 0 to 1. Samples with similarity score less than this threshold will be kept.
-      prompt_template: null                                   # Prompt template for generate samples. Please make sure the template contains "{augmented_data}", which corresponds to the augmented samples.
-      qa_pair_template: null                                  # Prompt template for generate question and answer pair description. Please make sure the template contains two "{}" to format question and answer. Default: '【问题】\n{}\n【回答】\n{}\n'.
-      example_template: null                                  # Prompt template for generate examples. Please make sure the template contains "{qa_pairs}", which corresponds to the question and answer pair description generated by param `qa_pair_template`.
-      qa_extraction_pattern: null                             # Regular expression pattern for parsing question and answer from model response.
-      enable_vllm: true                                       # Whether to use vllm for inference acceleration.
-      tensor_parallel_size: null                              # It is only valid when enable_vllm is True. The number of GPUs to use for distributed execution with tensor parallelism.
-      max_model_len: null                                     # It is only valid when enable_vllm is True. Model context length. If unspecified, will be automatically derived from the model config.
-      max_num_seqs: 256                                       # It is only valid when enable_vllm is True. Maximum number of sequences to be processed in a single iteration.
+  - generate_qa_from_examples_mapper:                       # mapper to generate question and answer pairs from examples.
+      hf_model: 'Qwen/Qwen2.5-7B-Instruct'                    # Model name on huggingface to generate question and answer pairs.
+      seed_file: 'demos/data/demo-dataset-chatml.jsonl'       # Path to the seed file in chatml format.
+      example_num: 3                                          # The number of randomly selected seed examples.
+      similarity_threshold: 0.7                               # the similarity score threshold between the generated samples and the seed examples. Range from 0 to 1. Samples with similarity score less than this threshold will be kept.
+      system_prompt: null                                     # System prompt for guiding the generation task.
+      input_template: null                                    # Template for building the input prompt.
+      example_template: null                                  # Template for formatting each QA example.
+      qa_pair_template: null                                  # Template for formatting a single QA pair within each example.
+      output_pattern: null                                    # Regular expression pattern to extract questions and answers from model response.
+      enable_vllm: false                                      # Whether to use vllm for inference acceleration.
+      model_params: {}                                        # Parameters for initializing the model.
       sampling_params: {}                                     # Sampling parameters for text generation. e.g {'temperature': 0.9, 'top_p': 0.95}
+      mem_required: '31GB'                                    # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrain the maximum number of processes that can be launched
+  - generate_qa_from_text_mapper:                           # mapper to generate question and answer pairs from text.
+      hf_model: 'alibaba-pai/pai-qwen1_5-7b-doc2qa'           # Model name on huggingface to generate question and answer pairs.
+      max_num: null                                           # The max num of returned QA sample for each text. Not limit if it is None.
+      output_pattern: null                                    # Regular expression pattern to extract questions and answers from model response.
+      enable_vllm: false                                      # Whether to use vllm for inference acceleration.
+      model_params: {}                                        # Parameters for initializing the model.
+      sampling_params: {}                                     # Sampling parameters for text generation. e.g {'temperature': 0.9, 'top_p': 0.95}
+      mem_required: '31GB'                                    # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrain the maximum number of processes that can be launched
   - image_blur_mapper:                                      # mapper to blur images.
       p: 0.2                                                  # probability of the image being blured
       blur_type: 'gaussian'                                   # type of blur kernel, including ['mean', 'box', 'gaussian']
@@ -106,7 +285,7 @@ process:
       keep_original_sample: true                              # whether to keep the original sample. If it's set to False, there will be only generated captions in the final datasets and the original captions will be removed. It's True in default.
       prompt: null                                            # a string prompt to guide the generation of blip2 model for all samples globally. It's None in default, which means no prompt provided.
       prompt_key: null                                        # the key name of fields in samples to store prompts for each sample. It's used for set different prompts for different samples. If it's none, use prompt in parameter "prompt". It's None in default.
-      mem_required: '16GB'                                    # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrains the maximum number of processes that can be launched
+      mem_required: '16GB'                                    # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrain the maximum number of processes that can be launched
   - image_diffusion_mapper:                                 # generate images by diffusion model
       hf_diffusion: 'CompVis/stable-diffusion-v1-4'           # stable diffusion model name on huggingface to generate image
       torch_dtype: 'fp32'                                     # the floating point type used to load the diffusion model. Can be one of ['fp32', 'fp16', 'bf16']
@@ -117,13 +296,26 @@ process:
       keep_original_sample: true                              # whether to keep the original sample. If it's set to False, there will be only generated images in the final datasets and the original images will be removed. It's True in default.
       caption_key: null                                       # the key name of fields in samples to store captions for each images, the caption guide the diffusion model to produce what the image is
       hf_img2seq: 'Salesforce/blip2-opt-2.7b'                 # model name on huggingface to generate caption if caption_key is null
-      mem_required: '8GB'                                    # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrains the maximum number of processes that can be launched
+      mem_required: '8GB'                                    # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrain the maximum number of processes that can be launched
   - image_face_blur_mapper:                                 # blur faces detected in images
       cv_classifier: ''                                       # OpenCV classifier path for face detection. By default, we will use 'haarcascade_frontalface_alt.xml'.
       blur_type: 'gaussian'                                   # type of blur kernel, including ['mean', 'box', 'gaussian']
       radius: 2                                               # radius of blur kernel
+  - image_segment_mapper:                                   # perform segment-anything on images and return the bounding boxes.
+      imgsz: 1024                                             # image resolution after image resizing
+      conf: 0.05                                              # confidence score threshold
+      iou: 0.5                                                # IoU (Intersection over Union) score threshold
+      mem_required: '800MB'                                   # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrain the maximum number of processes that can be launched
   - image_tagging_mapper:                                   # Mapper to generate image tags.
-      tag_field_name: '__dj__image_tags__'                    # the field name to store the tags. It's "__dj__image_tags__" in default.
+      tag_field_name: 'image_tags'                          # the field name to store the tags. It's "image_tags" in default.
+      mem_required: '9GB'
+  - mllm_mapper:                                            # use MLLMs for visual question answering tasks
+      hf_model: 'liuhaotian/llava-v1.6-vicuna-7b'             # model name of the MLLM on huggingface
+      max_new_tokens: 256                                     # the maximum number of new tokens generated by the model
+      temperature: 0.2                                        # used to control the randomness of the generated text
+      top_p: None                                             # randomly select the next word from the group of words whose cumulative probability reaches p
+      num_beams: 1                                            # the larger the beam search size, the higher the quality of the generated text
+      mem_required: '32GB'                                    # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrain the maximum number of processes that can be launched
   - nlpaug_en_mapper:                                       # simply augment texts in English based on the nlpaug library
       sequential: false                                       # whether combine all augmentation methods to a sequence. If it's True, a sample will be augmented by all opened augmentation methods sequentially. If it's False, each opened augmentation method would generate its augmented samples independently.
       aug_num: 1                                              # number of augmented samples to be generated. If `sequential` is True, there will be total aug_num augmented samples generated. If it's False, there will be (aug_num * #opened_aug_method) augmented samples generated.
@@ -146,14 +338,72 @@ process:
       delete_random_char: false                               # whether to open the augmentation method of deleting random characters from the original texts. e.g. "这里一共有5种不同的数据增强方法" --> "这里一共有5种不同的数据增强"
       swap_random_char: false                                 # whether to open the augmentation method of swapping random contiguous characters in the original texts. e.g. "这里一共有5种不同的数据增强方法" --> "这里一共有5种不同的数据强增方法"
       replace_equivalent_num: false                           # whether to open the augmentation method of replacing random numbers with their equivalent representations in the original texts. **Notice**: Only for numbers for now. e.g. "这里一共有5种不同的数据增强方法" --> "这里一共有伍种不同的数据增强方法"
-  - optimize_instruction_mapper:                            # optimize instruction.
-      hf_model: 'alibaba-pai/Qwen2-7B-Instruct-Refine'        # model name on huggingface to optimize instruction
-      enable_vllm: true                                       # whether to use vllm for inference acceleration.
-      tensor_parallel_size: null                              # It is only valid when enable_vllm is True. The number of GPUs to use for distributed execution with tensor parallelism.
-      max_model_len: null                                     # It is only valid when enable_vllm is True. Model context length. If unspecified, will be automatically derived from the model config.
-      max_num_seqs: 256                                       # It is only valid when enable_vllm is True. Maximum number of sequences to be processed in a single iteration.
+  - optimize_qa_mapper:                                     # optimize question-answer pairs.
+      hf_model: 'Qwen/Qwen2.5-7B-Instruct'                    # model name on huggingface.
+      system_prompt: null                                     # System prompt for guiding the optimization task.
+      input_template: null                                    # Template for building the input for the model.
+      qa_pair_template: null                                  # Template for formatting the question and answer pair.
+      output_pattern: null                                    # Regular expression pattern to extract question and answer from model response.
+      enable_vllm: false                                      # whether to use vllm for inference acceleration.
+      model_params: {}                                        # Parameters for initializing the model.
       sampling_params: {}                                     # Sampling parameters for text generation. e.g {'temperature': 0.9, 'top_p': 0.95}
+      mem_required: '31GB'                                    # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrain the maximum number of processes that can be launched
+  - optimize_query_mapper:                                  # optimize query in question-answer pairs.
+  - optimize_response_mapper:                               # optimize response in question-answer pairs.
+  - pair_preference_mapper:                                 # construct paired preference samples.
+      api_model: 'gpt-4o'                                     # API model name.
+      api_endpoint: null                                      # URL endpoint for the API.
+      response_path: null                                     # Path to extract content from the API response. Defaults to 'choices.0.message.content'.
+      system_prompt: null                                     # System prompt for guiding the generation task.
+      input_template: null                                    # Template for building the model input.
+      output_pattern: null                                    # Regular expression for parsing model output.
+      rejected_key: 'rejected_response'                       # The field name in the sample to store the generated rejected response.
+      reason_key: 'reason'                                    # The field name in the sample to store the reason for generating the response.
+      try_num: 3                                              # The number of retries for the API call in case of response parsing failure.
+      model_params: {}                                        # Parameters for initializing the API model.
+      sampling_params: {}                                     # Extra parameters passed to the API call.
   - punctuation_normalization_mapper:                       # normalize unicode punctuations to English punctuations.
+  - python_file_mapper:                                     # executing Python lambda function defined in a file.
+      file_path: ''                                           # The path to the Python file containing the function to be executed.
+      function_name: 'process_single'                         # The name of the function defined in the file to be executed.
+  - python_lambda_mapper:                                   # executing Python lambda function on data samples.
+      lambda_str: ''                                          # A string representation of the lambda function to be executed on data samples. If empty, the identity function is used.
+      batched: False                                          # A boolean indicating whether to process input data in batches.
+  - query_intent_detection_mapper:                          # Mapper to predict user's Intent label in query.
+      hf_model: 'bespin-global/klue-roberta-small-3i4k-intent-classification'     # Hugginface model ID to predict intent label.
+      zh_to_en_hf_model: 'Helsinki-NLP/opus-mt-zh-en'         # Translation model from Chinese to English. If not None, translate the query from Chinese to English.
+      model_params: {}                                        # model param for hf_model.
+      zh_to_en_model_params: {}                               # model param for zh_to_hf_model.
+      label_key: 'query_intent_label'                         # The key name in the meta field to store the output label. It is 'query_intent_label' in default.
+      score_key: 'query_intent_label_score'                   # The key name in the meta field to store the corresponding label score. It is 'query_intent_label_score' in default.
+  - query_sentiment_detection_mapper:                       # Mapper to predict user's sentiment label ('negative', 'neutral' and 'positive') in query.
+      hf_model: 'mrm8488/distilroberta-finetuned-financial-news-sentiment-analysis'     # Hugginface model ID to predict sentiment label.
+      zh_to_en_hf_model: 'Helsinki-NLP/opus-mt-zh-en'         # Translation model from Chinese to English. If not None, translate the query from Chinese to English.
+      model_params: {}                                        # model param for hf_model.
+      zh_to_en_model_params: {}                               # model param for zh_to_hf_model.
+      label_key: 'query_sentiment_label'                      # The key name in the meta field to store the output label. It is 'query_sentiment_label' in default.
+      score_key: 'query_sentiment_label_score'                # The key name in the meta field to store the corresponding label score. It is 'query_sentiment_label_score' in default.
+  - query_topic_detection_mapper:                           # Mapper to predict user's topic label in query.
+      hf_model: 'dstefa/roberta-base_topic_classification_nyt_news'     # Hugginface model ID to predict topic label.
+      zh_to_en_hf_model: 'Helsinki-NLP/opus-mt-zh-en'         # Translation model from Chinese to English. If not None, translate the query from Chinese to English.
+      model_params: {}                                        # model param for hf_model.
+      zh_to_en_model_params: {}                               # model param for zh_to_hf_model.
+      label_key: 'query_topic_label'                          # The key name in the meta field to store the output label. It is 'query_topic_label' in default.
+      score_key: 'query_topic_label_score'                    # The key name in the meta field to store the corresponding label score. It is 'query_topic_label_score' in default.
+  - relation_identity_mapper:                               # identify relation between two entity in the text.
+      api_model: 'gpt-4o'                                     # API model name.
+      source_entity: '孙悟空'                                  # The source entity of the relation to be dentified.
+      target_entity: '猪八戒'                                  # The target entity of the relation to be identified.
+      output_key: 'role_relation'                             # The output key in the meta field in the samples. It is 'role_relation' in default.
+      api_endpoint: null                                      # URL endpoint for the API.
+      response_path: null                                     # Path to extract content from the API response. Defaults to 'choices.0.message.content'.
+      system_prompt_template: null                            # System prompt template for the task. Need to specify by entity1 and entity2.
+      input_template: null                                    # Template for building the model input.
+      output_pattern_template: null                           # Regular expression template for parsing model output.
+      try_num: 3                                              # The number of retry attempts when there is an API call error or output parsing error.
+      drop_text: false                                        # If drop the text in the output.
+      model_params: {}                                        # Parameters for initializing the API model.
+      sampling_params: {}                                     # Extra parameters passed to the API call. e.g {'temperature': 0.9, 'top_p': 0.95}
   - remove_bibliography_mapper:                             # remove bibliography from Latex text.
   - remove_comments_mapper:                                 # remove comments from Latex text, code, etc.
       doc_type: tex                                           # comment type you want to remove. Only support 'tex' for now.
@@ -181,11 +431,33 @@ process:
       lang: en                                                # sample in which language
       tokenization: false                                     # whether to use model to tokenize documents
       substrings: ['http', 'www', '.com', 'href', '//']       # incorrect substrings to remove
+  - sdxl_prompt2prompt_mapper:                              # use the generative model SDXL and image editing technique Prompt-to-Prompt to generate pairs of similar images.
+      hf_diffusion: 'stabilityai/stable-diffusion-xl-base-1.0' # model name of the SDXL model on huggingface
+      num_inference_steps: 50                                 # the larger the value, the better the image generation quality
+      guidance_scale: 7.5                                     # a higher guidance_scale value encourages the model to generate images closely linked to the text prompt at the expense of lower image quality
+      text_key_second: None                                   # used to store the first caption in the caption pair
+      text_key_third: None                                    # used to store the second caption in the caption pair
+      mem_required: '38GB'                                    # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrain the maximum number of processes that can be launched
+  - sentence_augmentation_mapper:                           # augment sentences using LLMs.
+      hf_model: 'Qwen/Qwen2-7B-Instruct'                      # model name of the LLM on huggingface
+      system_prompt: None                                     # system prompt
+      task_sentence: None                                     # the instruction for the current task
+      max_new_tokens: 256                                     # the maximum number of new tokens generated by the model
+      temperature: 0.2                                        # used to control the randomness of generated text
+      top_p: None                                             # randomly select the next word from the group of words whose cumulative probability reaches p
+      num_beams: 1                                            # the larger the beam search size, the higher the quality of the generated text
+      mem_required: '31GB'                                    # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrain the maximum number of processes that can be launched
   - sentence_split_mapper:                                  # split text to multiple sentences and join them with '\n'
       lang: 'en'                                              # split text in what language
+  - text_chunk_mapper:                                      # Split input text to chunks.
+      max_len: 2000                                           # Split text into multi texts with this max len if not None.
+      split_pattern: '\n\n'                                   # Make sure split in this pattern if it is not None and force cut if the length exceeds max_len.
+      overlap_len: 200                                        # Overlap length of the split texts if not split in the split pattern.
+      tokenizer: 'gpt-4o'                                     # The tokenizer name of Hugging Face tokenizers. The text length will be calculate as the token num if it is offerd. Otherwise, the text length equals to string length.
+      trust_remote_code: True                                 # for loading huggingface model.
   - video_captioning_from_audio_mapper:                     # caption a video according to its audio streams based on Qwen-Audio model
       keep_original_sample: true                              # whether to keep the original sample. If it's set to False, there will be only captioned sample in the final datasets and the original sample will be removed. It's True in default.
-      mem_required: '30GB'                                    # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrains the maximum number of processes that can be launched
+      mem_required: '30GB'                                    # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrain the maximum number of processes that can be launched
   - video_captioning_from_frames_mapper:                    # generate samples whose captions are generated based on an image-to-text model and sampled video frames. Captions from different frames will be concatenated to a single string.
       hf_img2seq: 'Salesforce/blip2-opt-2.7b'                 # image-to-text model name on huggingface to generate caption
       caption_num: 1                                          # how many candidate captions to generate for each video
@@ -197,7 +469,7 @@ process:
       frame_num: 3                                            # the number of frames to be extracted uniformly from the video. Only works when frame_sampling_method is "uniform". If it's 1, only the middle frame will be extracted. If it's 2, only the first and the last frames will be extracted. If it's larger than 2, in addition to the first and the last frames, other frames will be extracted uniformly within the video duration.
       horizontal_flip: false                                  # flip frame image horizontally (left to right).
       vertical_flip: false                                    # flip frame image vertically (top to bottom).
-      mem_required: '20GB'                                    # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrains the maximum number of processes that can be launched
+      mem_required: '20GB'                                    # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrain the maximum number of processes that can be launched
   - video_captioning_from_summarizer_mapper:                # generate video captions by summarizing several kinds of generated texts (captions from video/audio/frames, tags from audio/frames, ...)
       hf_summarizer: 'mrm8488/flan-t5-large-finetuned-openai-summarize_from_feedback'  # the summarizer model used to summarize texts generated by other methods.
       consider_video_caption_from_video: true                 # whether to consider the video caption generated from video directly in the summarization process. Default: True.
@@ -211,7 +483,7 @@ process:
       vid_tag_from_frm_args: null                             # the arg dict for video tagging from sampled frames from the video with keys are the arg names and values are the arg values. Default: None.
       keep_tag_num: 5                                         # max number N of tags from sampled frames to keep. Too many tags might bring negative influence to summarized text, so we consider to only keep the N most frequent tags. Default: 5.
       keep_original_sample: true                              # whether to keep the original sample. If it's set to False, there will be only summarized captions in the final datasets and the original captions will be removed. It's True in default.
-      mem_required: '40GB'                                    # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrains the maximum number of processes that can be launched
+      mem_required: '40GB'                                    # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrain the maximum number of processes that can be launched
   - video_captioning_from_video_mapper:                     # generate captions by frame images extracted from video to augment datasets
       hf_video_blip: 'kpyu/video-blip-opt-2.7b-ego4d'         # video-blip model name on huggingface to generate caption
       caption_num: 1                                          # how many candidate captions to generate for each video
@@ -223,7 +495,12 @@ process:
       frame_num: 3                                            # the number of frames to be extracted uniformly from the video. Only works when frame_sampling_method is "uniform". If it's 1, only the middle frame will be extracted. If it's 2, only the first and the last frames will be extracted. If it's larger than 2, in addition to the first and the last frames, other frames will be extracted uniformly within the video duration.
       horizontal_flip: false                                  # flip frame image horizontally (left to right).
       vertical_flip: false                                    # flip frame image vertically (top to bottom).
-      mem_required: '20GB'                                    # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrains the maximum number of processes that can be launched
+      mem_required: '20GB'                                    # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrain the maximum number of processes that can be launched
+  - video_extract_frames_mapper:                            # extract frames from video files according to specified methods
+      frame_sampling_method: 'all_keyframes'                  # sampling method of extracting frame images from the videos. Should be one of ["all_keyframes", "uniform"]. The former one extracts all key frames and the latter one extract specified number of frames uniformly from the video. Default: "all_keyframes".
+      frame_num: 3                                            # the number of frames to be extracted uniformly from the video. Only works when frame_sampling_method is "uniform". If it's 1, only the middle frame will be extracted. If it's 2, only the first and the last frames will be extracted. If it's larger than 2, in addition to the first and the last frames, other frames will be extracted uniformly within the video duration.
+      duration: 0                                             # The duration of each segment in seconds. If 0, frames are extracted from the entire video. If duration > 0, the video is segmented into multiple segments based on duration, and frames are extracted from each segment.
+      frame_dir: None                                         # Output directory to save extracted frames. If None, a default directory based on the video file path is used.
   - video_face_blur_mapper:                                 # blur faces detected in videos
       cv_classifier: ''                                       # OpenCV classifier path for face detection. By default, we will use 'haarcascade_frontalface_alt.xml'.
       blur_type: 'gaussian'                                   # type of blur kernel, including ['mean', 'box', 'gaussian']
@@ -260,12 +537,13 @@ process:
       show_progress: false                                    # whether to show progress from scenedetect
   - video_tagging_from_audio_mapper:                        # Mapper to generate video tags from audio streams extracted from the video.
       hf_ast: 'MIT/ast-finetuned-audioset-10-10-0.4593'       # Huggingface model name for the audio classification model.
-      tag_field_name: '__dj__video_audio_tags__'              # the field name to store the tags. It's "__dj__video_audio_tags__" in default.
-      mem_required: '500MB'                                   # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrains the maximum number of processes that can be launched
+      tag_field_name: 'video_audio_tags'                    # the field name to store the tags. It's "video_audio_tags" in default.
+      mem_required: '500MB'                                   # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrain the maximum number of processes that can be launched
   - video_tagging_from_frames_mapper:                       # Mapper to generate video tags from frames extracted from the video.
       frame_sampling_method: 'all_keyframes'                  # sampling method of extracting frame images from the videos. Should be one of ["all_keyframes", "uniform"]. The former one extracts all key frames and the latter one extract specified number of frames uniformly from the video. Default: "all_keyframes".
       frame_num: 3                                            # the number of frames to be extracted uniformly from the video. Only works when frame_sampling_method is "uniform". If it's 1, only the middle frame will be extracted. If it's 2, only the first and the last frames will be extracted. If it's larger than 2, in addition to the first and the last frames, other frames will be extracted uniformly within the video duration.
-      tag_field_name: '__dj__video_frame_tags__'              # the field name to store the tags. It's "__dj__video_frame_tags__" in default.
+      tag_field_name: 'video_frame_tags'                    # the key name in the meta field to store the tags. It's "video_frame_tags" in default.
+      mem_required: '9GB'
   - whitespace_normalization_mapper:                        # normalize different kinds of whitespaces to English whitespace.
 
   # Filter ops
@@ -306,11 +584,15 @@ process:
       min_score: 0.3                                          # the min aesthetics score of filter range
       max_score: 1.0                                          # the max aesthetics score of filter range
       any_or_all: any                                         # keep this sample when any/all images meet the filter condition
-      mem_required: '1500MB'                                  # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrains the maximum number of processes that can be launched
+      mem_required: '1500MB'                                  # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrain the maximum number of processes that can be launched
   - image_aspect_ratio_filter:                              # filter samples according to the aspect ratios of images (a fraction of width by height, r=w/h) in them
       min_ratio: 0.333                                        # the min aspect ratio of filter range
       max_ratio: 3.0                                          # the max aspect ratio of filter range
       any_or_all: any                                         # keep this sample when any/all images meet the filter condition
+  - image_face_count_filter:                                # filter samples according to the face count in images
+      cv_classifier: ''                                       # OpenCV classifier path for face detection. By default, we will use 'haarcascade_frontalface_alt.xml'.
+      min_face_count: 1                                       # the minimum number of faces required for samples.
+      max_face_count: 1                                       # the maximum number of faces required for samples.
   - image_face_ratio_filter:                                # filter samples according to the face area ratios in images (r=face_area/image_area). If multiple faces are available, we use the largest one.
       cv_classifier: ''                                       # OpenCV classifier path for face detection. By default, we will use 'haarcascade_frontalface_alt.xml'.
       min_ratio: 0.0                                          # the min face area ratio of filter range
@@ -319,7 +601,7 @@ process:
       hf_nsfw_model: Falconsai/nsfw_image_detection           # Huggingface model name for nsfw classification
       score_threshold: 0.5                                    # the nsfw score threshold for samples, range from 0 to 1. Samples with nsfw score less than this threshold will be kept.
       any_or_all: any                                         # keep this sample when any/all images meet the filter condition
-      mem_required: '1GB'                                     # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrains the maximum number of processes that can be launched
+      mem_required: '1GB'                                     # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrain the maximum number of processes that can be launched
   - image_pair_similarity_filter:                           # filter samples according to the similarity score between the image pair.
       hf_clip: 'openai/clip-vit-base-patch32'                 # model name of the CLIP model on huggingface
       min_score: 0.1                                          # the min similarity score of filter range
@@ -343,7 +625,7 @@ process:
       vertical_flip: false                                    # flip image vertically (top to bottom).
       reduce_mode: avg                                        # reduce mode when one text corresponds to multiple images in a chunk,  must be one of ['avg','max', 'min'].
       any_or_all: any                                         # keep this sample when any/all images meet the filter condition
-      mem_required: '1500MB'                                  # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrains the maximum number of processes that can be launched
+      mem_required: '1500MB'                                  # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrain the maximum number of processes that can be launched
   - image_text_similarity_filter:                           # filter samples according to the similarity between image and text.
       hf_clip: openai/clip-vit-base-patch32                   # name of used Hugging Face clip
       min_score: 0.1                                          # the min similarity of filter range
@@ -352,12 +634,12 @@ process:
       vertical_flip: false                                    # flip image vertically (top to bottom).
       reduce_mode: avg                                        # reduce mode when one text corresponds to multiple images in a chunk,  must be one of ['avg','max', 'min'].
       any_or_all: any                                         # keep this sample when any/all images meet the filter condition
-      mem_required: '1500MB'                                  # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrains the maximum number of processes that can be launched
+      mem_required: '1500MB'                                  # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrain the maximum number of processes that can be launched
   - image_watermark_filter:                                 # filter samples according to the predicted watermark probabilities of images in them
       hf_watermark_model: amrul-hzz/watermark_detector        # Huggingface model name for watermark classification
       prob_threshold: 0.8                                     # the predicted watermark probability threshold for samples, range from 0 to 1. Samples with watermark probability less than this threshold will be kept.
       any_or_all: any                                         # keep this sample when any/all images meet the filter condition
-      mem_required: '500MB'                                   # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrains the maximum number of processes that can be launched
+      mem_required: '500MB'                                   # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrain the maximum number of processes that can be launched
   - language_id_score_filter:                               # filter text in specific language with language scores larger than a specific max value
       lang: en                                                # keep text in what language
       min_score: 0.8                                          # the min language scores to filter text
@@ -378,7 +660,7 @@ process:
       conf_thr: 0.0                                           # the confidence score threshold for removing low-confidence bboxes
       reduce_mode: avg                                        # reduce mode when one text corresponds to multiple images in a chunk,  must be one of ['avg','max', 'min'].
       any_or_all: any                                         # keep this sample when any/all images meet the filter condition
-      mem_required: '1GB'                                     # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrains the maximum number of processes that can be launched
+      mem_required: '1GB'                                     # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrain the maximum number of processes that can be launched
   - special_characters_filter:                              # filter text with special-char ratio out of specific range
       min_ratio: 0.0                                          # the min ratio of filter range
       max_ratio: 0.25                                         # the max ratio of filter range
@@ -409,6 +691,13 @@ process:
   - text_length_filter:                                     # filter text with length out of specific range
       min_len: 10                                             # the min length of filter range
       max_len: 10000                                          # the max length of filter range
+  - text_pair_similarity_filter:                            # filter samples according to the similarity score between the text pair.
+      hf_clip: 'openai/clip-vit-base-patch32'                 # model name of the CLIP model on huggingface
+      min_score: 0.1                                          # the min similarity score of filter range
+      max_score: 1.0                                          # the max similarity score of filter range
+      text_key_second: None                                   # used to store the other sentence in the text pair
+      any_or_all: "any"                                       # keep this sample when any/all text pairs meet the filter condition
+      mem_required: '1500MB'                                  # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrain the maximum number of processes that can be launched
   - token_num_filter:                                       # filter text with total token number out of specific range
       hf_tokenizer: EleutherAI/pythia-6.9b-deduped            # name of used Hugging Face tokenizer
       min_num: 10                                             # the min number of filter range
@@ -421,7 +710,7 @@ process:
       frame_num: 3                                            # the number of frames to be extracted uniformly from the video. Only works when frame_sampling_method is "uniform". If it's 1, only the middle frame will be extracted. If it's 2, only the first and the last frames will be extracted. If it's larger than 2, in addition to the first and the last frames, other frames will be extracted uniformly within the video duration.
       reduce_mode: avg                                        # reduce mode to the all frames extracted from videos, must be one of ['avg','max', 'min'].
       any_or_all: any                                         # keep this sample when any/all images meet the filter condition
-      mem_required: '1500MB'                                  # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrains the maximum number of processes that can be launched
+      mem_required: '1500MB'                                  # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrain the maximum number of processes that can be launched
   - video_aspect_ratio_filter:                              # filter samples according to the aspect ratios of videos (a fraction of width by height, r=w/h) in them
       min_ratio: 9/21                                         # the minimum aspect ratio to keep samples, supported format is a string, such as "9:21" or "9/21".
       max_ratio: 21/9                                         # the maximum aspect ratio to keep samples, supported format is a string, such as "21:9" or "21/9".
@@ -440,13 +729,23 @@ process:
       vertical_flip: false                                    # flip frame image vertically (top to bottom).
       reduce_mode: avg                                        # reduce mode when one text corresponds to multiple videos in a chunk,  must be one of ['avg','max', 'min'].
       any_or_all: any                                         # keep this sample when any/all videos meet the filter condition
-      mem_required: '1GB'                                     # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrains the maximum number of processes that can be launched
+      mem_required: '1500MB'                                  # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrain the maximum number of processes that can be launched
   - video_motion_score_filter:                              # Keep samples with video motion scores within a specific range.
       min_score: 0.25                                         # the minimum motion score to keep samples
       max_score: 10000.0                                      # the maximum motion score to keep samples
       sampling_fps: 2                                         # the samplig rate of frames_per_second to compute optical flow
       size: null                                              # resize frames along the smaller edge before computing optical flow, or a sequence like (h, w)
       max_size: null                                          # maximum allowed for the longer edge of resized frames
+      divisible: 1                                            # The number that the dimensions must be divisible by.
+      relative: false                                         # whether to normalize the optical flow magnitude to [0, 1], relative to the frame's diagonal length
+      any_or_all: any                                         # keep this sample when any/all videos meet the filter condition
+  - video_motion_score_raft_filter:                         # Keep samples with video motion scores (based on RAFT model) within a specific range.
+      min_score: 1.0                                          # the minimum motion score to keep samples
+      max_score: 10000.0                                      # the maximum motion score to keep samples
+      sampling_fps: 2                                         # the samplig rate of frames_per_second to compute optical flow
+      size: null                                              # resize frames along the smaller edge before computing optical flow, or a sequence like (h, w)
+      max_size: null                                          # maximum allowed for the longer edge of resized frames
+      divisible: 8                                            # The number that the dimensions must be divisible by.
       relative: false                                         # whether to normalize the optical flow magnitude to [0, 1], relative to the frame's diagonal length
       any_or_all: any                                         # keep this sample when any/all videos meet the filter condition
   - video_nsfw_filter:                                      # filter samples according to the nsfw scores of videos in them
@@ -456,7 +755,7 @@ process:
       frame_num: 3                                            # the number of frames to be extracted uniformly from the video. Only works when frame_sampling_method is "uniform". If it's 1, only the middle frame will be extracted. If it's 2, only the first and the last frames will be extracted. If it's larger than 2, in addition to the first and the last frames, other frames will be extracted uniformly within the video duration.
       reduce_mode: avg                                        # reduce mode for multiple sampled video frames to compute nsfw scores of videos, must be one of ['avg','max', 'min'].
       any_or_all: any                                         # keep this sample when any/all images meet the filter condition
-      mem_required: '1GB'                                     # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrains the maximum number of processes that can be launched
+      mem_required: '1GB'                                     # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrain the maximum number of processes that can be launched
   - video_ocr_area_ratio_filter:                            # Keep data samples whose detected text area ratios for specified frames in the video are within a specified range.
       min_area_ratio: 0                                       # the min ocr area ratio to keep samples. It's 0 by default.
       max_area_ratio: 1.0                                     # the max ocr area ratio to keep samples. It's 1.0 by default.
@@ -476,14 +775,15 @@ process:
       frame_num: 3                                            # the number of frames to be extracted uniformly from the video. Only works when frame_sampling_method is "uniform". If it's 1, only the middle frame will be extracted. If it's 2, only the first and the last frames will be extracted. If it's larger than 2, in addition to the first and the last frames, other frames will be extracted uniformly within the video duration.
       reduce_mode: avg                                        # reduce mode for multiple sampled video frames to compute final predicted watermark probabilities of videos, must be one of ['avg','max', 'min'].
       any_or_all: any                                         # keep this sample when any/all images meet the filter condition
-      mem_required: '500MB'                                   # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrains the maximum number of processes that can be launched
+      mem_required: '500MB'                                   # This operation (Op) utilizes deep neural network models that consume a significant amount of memory for computation, hence the system's available memory might constrain the maximum number of processes that can be launched
   - video_tagging_from_frames_filter:                       # filter samples according to the tags of videos in them
       tags: ['people']                                        # a tag list to shift the videos, total tags can be found in https://github.com/xinyu1205/recognize-anything/blob/main/ram/data/ram_tag_list.txt
       contain: any                                            # require the videos containing 'any' or 'all' given tags. When tags equal to [], 'all' keeps all samples, 'any' keeps no sample.
       frame_sampling_method: all_keyframes                    # sampling method of extracting frame images from the videos. Should be one of ["all_keyframes", "uniform"]. The former one extracts all key frames and the latter one extract specified number of frames uniformly from the video. Default: "all_keyframes".
       frame_num: 3                                            # the number of frames to be extracted uniformly from the video. Only works when frame_sampling_method is "uniform". If it's 1, only the middle frame will be extracted. If it's 2, only the first and the last frames will be extracted. If it's larger than 2, in addition to the first and the last frames, other frames will be extracted uniformly within the video duration.
-      tag_field_name: '__dj__video_frame_tags__'              # the field name to store the tags. It's "__dj__video_frame_tags__" in default.
+      tag_field_name: 'video_frame_tags'                    # the key name in the meta field to store the tags. It's "video_frame_tags" in default.
       any_or_all: any                                         # keep this sample when any/all videos meet the filter condition
+      mem_required: '9GB'
   - words_num_filter:                                       # filter text with number of words out of specific range
       lang: en                                                # sample in which language
       tokenization: false                                     # whether to use model to tokenize documents
@@ -523,17 +823,35 @@ process:
   - video_deduplicator:                                     # deduplicator to deduplicate samples at document-level using exact matching of videos between documents.
       consider_text: false                                    # whether to consider text hash together with video hash when applying deduplication.
   - ray_video_deduplicator:                                 # the simple video deduplicator that can run on multi-nodes using md5 hashing exact matching method
-      redis_host: 'redis_host'                              # the host of the redis instance
-      redis_port: 6380                                      # the port of redis instance, please note that the default port of redis is 6379 which is the same as default port for ray, so we need to modify the default redis config to use it in other port
+      backend: 'ray_actor'                                    # the backend for dedup, either 'ray_actor' or 'redis'
+      redis_address: 'redis://localhost:6379'                 # the address of redis server
   - ray_image_deduplicator:                                 # the simple image deduplicator that can deduplicate samples at document-level using exact matching of images between documents.
-      redis_host: 'redis_host'                              # the host of the redis instance
-      redis_port: 6380                                      # the port of redis instance, please note that the default port of redis is 6379 which is the same as default port for ray, so we need to modify the default redis config to use it in other port
-      method: phash                                         # hash method for image. One of [phash, dhash, whash, ahash]
+      backend: 'ray_actor'                                    # the backend for dedup, either 'ray_actor' or 'redis'
+      redis_address: 'redis://localhost:6379'                 # the address of redis server
+      method: phash                                           # hash method for image. One of [phash, dhash, whash, ahash]
   - ray_document_deduplicator:                              # the simple document deduplicator that can run on multi-nodes using md5 hashing exact matching method
-      redis_host: 'redis_host'                              # the host of the redis instance
-      redis_port: 6380                                      # the port of redis instance, please note that the default port of redis is 6379 which is the same as default port for ray, so we need to modify the default redis config to use it in other port
+      backend: 'ray_actor'                                    # the backend for dedup, either 'ray_actor' or 'redis'
+      redis_address: 'redis://localhost:6379'                 # the address of redis server
       lowercase: false                                        # whether to convert text to lower case
       ignore_non_character: false                             # whether to ignore non-alphabet characters, including whitespaces, digits, and punctuations
+  - ray_bts_minhash_deduplicator:                            # the document deduplicator that can run on multi-nodes using minhashLSH algorithm
+      tokenization: space                                     # tokenization method for text. One of [space, punctuation, character, sentencepiece]
+      window_size: 5                                          # window size of shingling
+      num_permutations: 256                                   # number of permutations in minhash computing
+      jaccard_threshold: 0.7                                  # the min jaccard similarity threshold in near-duplicate detection. When the jaccard similarity of two sample texts is >= this threshold, they are regarded as similar samples and this op will only keep one of them after deduplication
+      num_bands: null                                         # number of bands in LSH. Default it's None, and it will be determined by an optimal params computation algorithm by minimize the weighted sum of probs of False Positives and False Negatives
+      num_rows_per_band: null                                 # number of rows in each band in LSH. Default it's None, and it will be determined by an optimal params computation algorithm
+      lowercase: true                                         # whether to convert text to lower case
+      ignore_pattern: null                                    # whether to ignore sub-strings with specific pattern when computing simhash.
+      tokenizer_model: null                                   # path for the sentencepiece model, used for sentencepiece tokenization.
+      union_find_parallel_num: 'auto'                         # number of parallel workers for union-find algorithm. Default it's 'auto', and it will be determined by half of the number of CPUs.
+      union_threshold: 256                                    # threshold for minhash values group to perform union-find algorightm.
+      max_pending_edge_buffer_task: 20                        # max number of pending edge buffer ray tasks.
+      num_edge_buffer_task_returns: 10                        # number of edge buffer tasks for `ray.wait` to return.
+      max_pending_filter_tasks: 20                            # max number of pending filter ray tasks.
+      num_filter_task_returns: 10                             # number of filter tasks for `ray.wait` to return.
+      merge_batch_size: 1000                                  # batch size for BTS operations.
+      tmp_file_name: './outputs/ray-dedup-tmp/'               # the temporary folder name for deduplication.
 
   # Selector ops
   - frequency_specified_field_selector:                     # selector to select samples based on the sorted frequency of specified field value
@@ -550,8 +868,79 @@ process:
       upper_percentile:                                       # the upper bound of the percentile to be sampled
       lower_rank:                                             # the lower rank of the percentile to be sampled
       upper_rank:                                             # the upper rank of the percentile to be sampled
+  - tags_specified_field_selector:                          # Selector to select samples based on the tags of specified field.
+      field_key: '__dj__meta__.query_sentiment_label'         # the target keys corresponding to multi-level field information need to be separated by '.'
+      target_tags: ['happy', 'sad']                           # Target tags to be select.
   - topk_specified_field_selector:                          # selector to select top samples based on the sorted specified field
       field_key: ''                                           # the target keys corresponding to multi-level field information need to be separated by '.'
       top_ratio:                                              # ratio of selected top samples
       topk:                                                   # number of selected top sample
       reverse: True                                           # determine the sorting rule, if reverse=True, then sort in descending order
+
+# Grouper ops.
+  - naive_grouper:                                          # Group all samples to one batched sample.
+  - naive_reverse_grouper:                                  # Split one batched sample to samples.
+      batch_meta_export_path: null                            # the path to export the batch meta. Just drop the batch meta if it is None.
+  - key_value_grouper:                                      # Group samples to batched samples according values in given keys.
+      group_by_keys: null                                     # Group samples according values in the keys. Support for nested keys such as "__dj__stats__.text_len". It is [self.text_key] in default.
+
+# aggregator ops.
+  - entity_attribute_aggregator:                            # Return conclusion of the given entity's attribute from some docs.
+      api_model: 'gpt-4o'                                     # API model name.
+      entity: '孙悟空'                                         # The given entity.
+      attribute: '人物经历'                                    # The given attribute.
+      input_key: 'event_description'                          # The input key in the meta field of the samples. It is "event_description" in default.
+      output_key: 'entity_attribute'                          # The output key in the aggregation field of the samples. It is "entity_attribute" in default.
+      word_limit: 100                                         # Prompt the output length.
+      max_token_num: null                                     # The max token num of the total tokens of the sub documents. Without limitation if it is None.
+      api_endpoint: null                                      # URL endpoint for the API.
+      response_path: null                                     # Path to extract content from the API response. Defaults to 'choices.0.message.content'.
+      system_prompt_template: null                            # System prompt template for the task. Need to be specified by given entity and attribute.
+      example_prompt: null                                    # The example part in the system prompt.
+      input_template: null                                    # The input template.
+      output_pattern_template: null                           # The output template.
+      try_num: 3                                              # The number of retry attempts when there is an API call error or output parsing error.
+      model_params: {}                                        # Parameters for initializing the API model.
+      sampling_params: {}                                     # Extra parameters passed to the API call. e.g {'temperature': 0.9, 'top_p': 0.95}
+  - meta_tags_aggregator:                                   # Merge similar meta tags to one tag.
+      api_model: 'gpt-4o'                                     # API model name.
+      meta_tag_key: 'query_sentiment_label'                   # The key of the meta tag to be mapped. It is "query_sentiment_label" in default.
+      target_tags: ['开心', '难过', '其他']                     # The tags that is supposed to be mapped to.
+      api_endpoint: null                                      # URL endpoint for the API.
+      response_path: null                                     # Path to extract content from the API response. Defaults to 'choices.0.message.content'.
+      system_prompt: null                                     # The system prompt.
+      input_template: null                                    # The input template.
+      target_tag_template: null                               # The tap template for target tags.
+      tag_template: null                                      # The tap template for each tag and its frequency.
+      output_pattern: null                                    # The output pattern.
+      try_num: 3                                              # The number of retry attempts when there is an API call error or output parsing error.
+      model_params: {}                                        # Parameters for initializing the API model.
+      sampling_params: {}                                     # Extra parameters passed to the API call. e.g {'temperature': 0.9, 'top_p': 0.95}
+  - most_relavant_entities_aggregator:                      # Extract entities closely related to a given entity from some texts, and sort them in descending order of importance.
+      api_model: 'gpt-4o'                                     # API model name.
+      entity: '孙悟空'                                         # The given entity.
+      query_entity_type: '人物'                                # The type of queried relavant entities.
+      input_key: 'event_description'                          # The input key in the meta field of the samples. It is "event_description" in default.
+      output_key: 'most_relavant_entities'                    # The output key in the aggregation field of the samples. It is "most_relavant_entities" in default.
+      max_token_num: null                                     # The max token num of the total tokens of the sub documents. Without limitation if it is None.
+      api_endpoint: null                                      # URL endpoint for the API.
+      response_path: null                                     # Path to extract content from the API response. Defaults to 'choices.0.message.content'.
+      system_prompt_template: null                            # System prompt template for the task. Need to be specified by given entity and entity_type.
+      input_template: null                                    # The input template.
+      output_pattern: null                                    # The output pattern.
+      try_num: 3                                              # The number of retry attempts when there is an API call error or output parsing error.
+      model_params: {}                                        # Parameters for initializing the API model.
+      sampling_params: {}                                     # Extra parameters passed to the API call. e.g {'temperature': 0.9, 'top_p': 0.95}
+  - nested_aggregator:                                      # Considering the limitation of input length, nested aggregate contents for each given number of samples.
+      api_model: 'gpt-4o'                                     # API model name.
+      input_key: 'event_description'                          # The input key in the meta field of the samples. It is "event_description" in default.
+      output_key: null                                        # The output key in the aggregation field in the samples. It is same as the input_key in default.
+      max_token_num: null                                     # The max token num of the total tokens of the sub documents. Without limitation if it is None.
+      api_endpoint: null                                      # URL endpoint for the API.
+      response_path: null                                     # Path to extract content from the API response. Defaults to 'choices.0.message.content'.
+      system_prompt: null                                     # The system prompt.
+      sub_doc_template: null                                  # The template for input text in each sample.
+      input_template: null                                    # The input template.
+      try_num: 3                                              # The number of retry attempts when there is an API call error or output parsing error.
+      model_params: {}                                        # Parameters for initializing the API model.
+      sampling_params: {}                                     # Extra parameters passed to the API call. e.g {'temperature': 0.9, 'top_p': 0.95}
