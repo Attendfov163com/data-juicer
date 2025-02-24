@@ -1,15 +1,16 @@
 from typing import Dict, List, Optional
 
-from data_juicer.utils.availability_utils import AvailabilityChecking
+from data_juicer.utils.constant import Fields
 from data_juicer.utils.file_utils import transfer_filename
+from data_juicer.utils.lazy_loader import LazyLoader
 from data_juicer.utils.logger_utils import HiddenPrints
 
 from ..base_op import OPERATORS, Mapper
 
-OP_NAME = 'audio_ffmpeg_wrapped_mapper'
+with HiddenPrints():
+    ffmpeg = LazyLoader('ffmpeg', 'ffmpeg')
 
-with AvailabilityChecking(['ffmpeg-python'], OP_NAME), HiddenPrints():
-    import ffmpeg
+OP_NAME = 'audio_ffmpeg_wrapped_mapper'
 
 
 @OPERATORS.register_module(OP_NAME)
@@ -47,18 +48,22 @@ class AudioFFmpegWrappedMapper(Mapper):
         self.capture_stderr = capture_stderr
         self.overwrite_output = overwrite_output
 
-    def process(self, sample):
+    def process_single(self, sample):
         # there is no audio in this sample
         if self.audio_key not in sample or not sample[self.audio_key]:
+            sample[Fields.source_file] = []
             return sample
+
+        if Fields.source_file not in sample or not sample[Fields.source_file]:
+            sample[Fields.source_file] = sample[self.audio_key]
 
         if self.filter_name is None:
             return sample
 
         loaded_audio_keys = sample[self.audio_key]
-        proceessed = {}
+        processed = {}
         for audio_key in loaded_audio_keys:
-            if audio_key in proceessed:
+            if audio_key in processed:
                 continue
 
             output_key = transfer_filename(audio_key, OP_NAME,
@@ -69,7 +74,13 @@ class AudioFFmpegWrappedMapper(Mapper):
                 stream = stream.global_args(*self.global_args)
             stream.run(capture_stderr=self.capture_stderr,
                        overwrite_output=self.overwrite_output)
-            proceessed[audio_key] = output_key
+            processed[audio_key] = output_key
 
-        sample[self.audio_key] = [proceessed[key] for key in loaded_audio_keys]
+        # when the file is modified, its source file needs to be updated.
+        for i, value in enumerate(loaded_audio_keys):
+            if sample[Fields.source_file][i] != value:
+                if processed[value] != value:
+                    sample[Fields.source_file][i] = value
+
+        sample[self.audio_key] = [processed[key] for key in loaded_audio_keys]
         return sample

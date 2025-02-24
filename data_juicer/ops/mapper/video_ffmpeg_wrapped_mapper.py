@@ -1,15 +1,16 @@
 from typing import Dict, List, Optional
 
-from data_juicer.utils.availability_utils import AvailabilityChecking
+from data_juicer.utils.constant import Fields
 from data_juicer.utils.file_utils import transfer_filename
+from data_juicer.utils.lazy_loader import LazyLoader
 from data_juicer.utils.logger_utils import HiddenPrints
 
 from ..base_op import OPERATORS, Mapper
 
-OP_NAME = 'video_ffmpeg_wrapped_mapper'
+with HiddenPrints():
+    ffmpeg = LazyLoader('ffmpeg', 'ffmpeg')
 
-with AvailabilityChecking(['ffmpeg-python'], OP_NAME), HiddenPrints():
-    import ffmpeg
+OP_NAME = 'video_ffmpeg_wrapped_mapper'
 
 
 @OPERATORS.register_module(OP_NAME)
@@ -47,18 +48,22 @@ class VideoFFmpegWrappedMapper(Mapper):
         self.capture_stderr = capture_stderr
         self.overwrite_output = overwrite_output
 
-    def process(self, sample):
+    def process_single(self, sample):
         # there is no video in this sample
         if self.video_key not in sample or not sample[self.video_key]:
+            sample[Fields.source_file] = []
             return sample
+
+        if Fields.source_file not in sample or not sample[Fields.source_file]:
+            sample[Fields.source_file] = sample[self.video_key]
 
         if self.filter_name is None:
             return sample
 
         loaded_video_keys = sample[self.video_key]
-        proceessed = {}
+        processed = {}
         for video_key in loaded_video_keys:
-            if video_key in proceessed:
+            if video_key in processed:
                 continue
 
             output_key = transfer_filename(video_key, OP_NAME,
@@ -69,7 +74,13 @@ class VideoFFmpegWrappedMapper(Mapper):
                 stream = stream.global_args(*self.global_args)
             stream.run(capture_stderr=self.capture_stderr,
                        overwrite_output=self.overwrite_output)
-            proceessed[video_key] = output_key
+            processed[video_key] = output_key
 
-        sample[self.video_key] = [proceessed[key] for key in loaded_video_keys]
+        # when the file is modified, its source file needs to be updated.
+        for i, value in enumerate(loaded_video_keys):
+            if sample[Fields.source_file][i] != value:
+                if processed[value] != value:
+                    sample[Fields.source_file][i] = value
+
+        sample[self.video_key] = [processed[key] for key in loaded_video_keys]
         return sample

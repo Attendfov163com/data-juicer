@@ -43,6 +43,7 @@ extra_requires = {
         ['preprocess_requires.txt', 'quality_classifier_requires.txt']),
 }
 extra_requires['all'] = [v for v in extra_requires.values()]
+extra_requires['sandbox'] = get_install_requirements(['sandbox_requires.txt'])
 
 with open('data_juicer/__init__.py', 'r') as f:
     version = re.search(r'^__version__\s*=\s*[\'"]([^\'"]*)[\'"]', f.read(),
@@ -55,7 +56,7 @@ setuptools.setup(
     name='py-data-juicer',
     version=version,
     url='https://github.com/alibaba/data-juicer',
-    author='SysML team of Alibaba DAMO Academy',
+    author='SysML Team of Alibaba Tongyi Lab',
     description='A One-Stop Data Processing System for Large Language '
     'Models.',
     long_description=readme_md,
@@ -68,6 +69,7 @@ setuptools.setup(
         'console_scripts': [
             'dj-process = data_juicer.tools.process_data:main',
             'dj-analyze = data_juicer.tools.analyze_data:main',
+            'dj-install = data_juicer.tools.dj_install:main',
         ]
     },
     install_requires=min_requires,

@@ -1,41 +1,37 @@
 import numpy as np
-from jsonargparse.typing import ClosedUnitInterval, PositiveInt
 from loguru import logger
+from pydantic import PositiveInt
 
-from data_juicer.utils.availability_utils import AvailabilityChecking
 from data_juicer.utils.constant import Fields, StatsKeys
-from data_juicer.utils.mm_utils import (extract_key_frames,
+from data_juicer.utils.lazy_loader import LazyLoader
+from data_juicer.utils.mm_utils import (close_video, extract_key_frames,
                                         extract_video_frames_uniformly,
                                         load_data_with_context, load_video)
 
 from ...utils.model_utils import get_model, prepare_model
 from ..base_op import OPERATORS, Filter
-from ..op_fusion import LOADED_VIDEOS
+from ..op_fusion import INTER_SAMPLED_FRAMES, LOADED_VIDEOS
+
+torch = LazyLoader('torch', 'torch')
 
 OP_NAME = 'video_aesthetics_filter'
-CHECK_PKGS = ['torch', 'transformers', 'simple-aesthetics-predictor']
-
-with AvailabilityChecking(CHECK_PKGS, OP_NAME):
-
-    import aesthetics_predictor  # noqa: F401
-    import torch
-    import transformers  # noqa: F401
-
-    # avoid hanging when calling clip in multiprocessing
-    torch.set_num_threads(1)
 
 
 @OPERATORS.register_module(OP_NAME)
 @LOADED_VIDEOS.register_module(OP_NAME)
+@INTER_SAMPLED_FRAMES.register_module(OP_NAME)
 class VideoAestheticsFilter(Filter):
     """Filter to keep data samples with aesthetics scores for specified frames
     in the videos within a specific range.
     """
 
+    _accelerator = 'cuda'
+
     def __init__(self,
-                 hf_scorer_model='',
-                 min_score: ClosedUnitInterval = 0.4,
-                 max_score: ClosedUnitInterval = 1.0,
+                 hf_scorer_model: str = '',
+                 trust_remote_code: bool = False,
+                 min_score: float = 0.4,
+                 max_score: float = 1.0,
                  frame_sampling_method: str = 'uniform',
                  frame_num: PositiveInt = 3,
                  any_or_all: str = 'any',
@@ -77,7 +73,7 @@ class VideoAestheticsFilter(Filter):
         :param args: Extra positional arguments.
         :param kwargs: Extra keyword arguments.
         """
-
+        kwargs.setdefault('mem_required', '1500MB')
         super().__init__(*args, **kwargs)
         if hf_scorer_model == '':
             hf_scorer_model = \
@@ -102,15 +98,19 @@ class VideoAestheticsFilter(Filter):
 
         self.model_key = prepare_model(
             model_type='simple_aesthetics',
-            pretrained_model_name_or_path=hf_scorer_model)
+            pretrained_model_name_or_path=hf_scorer_model,
+            trust_remote_code=trust_remote_code)
         # the original score predicted by laion-ai's scorer is within [0, 10]
         self.need_normalized_by_ten = ('shunk031/aesthetics-predictor'
                                        in hf_scorer_model)
-        self._accelerator = 'cuda'
         self.frame_sampling_method = frame_sampling_method
         self.frame_num = frame_num
 
-    def compute_stats(self, sample, rank=None, context=False):
+        self.sampled_frames_key_suffix = f'-{frame_sampling_method}' + \
+            ('' if frame_sampling_method == 'all_keyframes'
+             else f'-{frame_num}')
+
+    def compute_stats_single(self, sample, rank=None, context=False):
         # check if it's computed already
         if StatsKeys.video_frames_aesthetics_score in sample[Fields.stats]:
             return sample
@@ -127,10 +127,13 @@ class VideoAestheticsFilter(Filter):
                                                 loaded_video_keys, load_video)
 
         aesthetics_scores = []
-        for video in videos:
-            all_frames = []
+        for key, video in videos.items():
+            sampled_frames_key = key + self.sampled_frames_key_suffix
             if video is None:
                 continue
+            elif context and sampled_frames_key in sample[Fields.context]:
+                # sampled frames can be found in the context
+                frames = sample[Fields.context][sampled_frames_key]
             else:
                 # extract frame images
                 if self.frame_sampling_method == 'all_keyframes':
@@ -140,25 +143,35 @@ class VideoAestheticsFilter(Filter):
                         video, self.frame_num)
                 else:
                     frames = []
-                all_frames.extend(frames)
-            frame_images = [frame.to_image() for frame in all_frames]
 
-            # compute aesthetics_scores
-            model, processor = get_model(self.model_key, rank=rank)
-            inputs = processor(images=frame_images, return_tensors='pt')
-            with torch.no_grad():
-                outputs = model(**inputs)
-            if self.need_normalized_by_ten:
-                aesthetics_score = (outputs.logits / 10.0).detach().cpu()
-            else:
-                aesthetics_score = outputs.logits.detach().cpu()
+                # store the sampled frames in the context
+                if context:
+                    sample[Fields.context][sampled_frames_key] = frames
+            frame_images = [frame.to_image() for frame in frames]
 
-            if self.reduce_mode == 'avg':
-                aesthetics_score = float(aesthetics_score.mean())
-            elif self.reduce_mode == 'max':
-                aesthetics_score = float(aesthetics_score.max())
+            if len(frame_images) > 0:
+                # compute aesthetics_scores
+                model, processor = get_model(self.model_key,
+                                             rank=rank,
+                                             use_cuda=self.use_cuda())
+                inputs = processor(images=frame_images,
+                                   return_tensors='pt').to(model.device)
+                with torch.no_grad():
+                    outputs = model(**inputs)
+                if self.need_normalized_by_ten:
+                    aesthetics_score = outputs.logits / 10.0
+                else:
+                    aesthetics_score = outputs.logits
+
+                if self.reduce_mode == 'avg':
+                    aesthetics_score = float(aesthetics_score.mean())
+                elif self.reduce_mode == 'max':
+                    aesthetics_score = float(aesthetics_score.max())
+                else:
+                    aesthetics_score = float(aesthetics_score.min())
             else:
-                aesthetics_score = float(aesthetics_score.min())
+                aesthetics_score = 0.0
+
             aesthetics_scores.append(aesthetics_score)
 
         logger.debug(f'aesthetics_score: {aesthetics_scores}')
@@ -168,11 +181,11 @@ class VideoAestheticsFilter(Filter):
 
         if not context:
             for vid_key in videos:
-                videos[vid_key].close()
+                close_video(videos[vid_key])
 
         return sample
 
-    def process(self, sample):
+    def process_single(self, sample):
         aesthetics_scores = (
             sample)[Fields.stats][StatsKeys.video_frames_aesthetics_score]
         if len(aesthetics_scores) <= 0:

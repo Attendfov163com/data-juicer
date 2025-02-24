@@ -1,10 +1,10 @@
 import sys
 
 import numpy as np
-from jsonargparse.typing import PositiveInt
 
 from data_juicer.utils.constant import Fields, StatsKeys
-from data_juicer.utils.mm_utils import load_data_with_context, load_video
+from data_juicer.utils.mm_utils import (close_video, load_data_with_context,
+                                        load_video)
 
 from ..base_op import OPERATORS, Filter
 from ..op_fusion import LOADED_VIDEOS
@@ -19,10 +19,10 @@ class VideoResolutionFilter(Filter):
     """
 
     def __init__(self,
-                 min_width: PositiveInt = 1,
-                 max_width: PositiveInt = sys.maxsize,
-                 min_height: PositiveInt = 1,
-                 max_height: PositiveInt = sys.maxsize,
+                 min_width: int = 1,
+                 max_width: int = sys.maxsize,
+                 min_height: int = 1,
+                 max_height: int = sys.maxsize,
                  any_or_all: str = 'any',
                  *args,
                  **kwargs):
@@ -50,7 +50,7 @@ class VideoResolutionFilter(Filter):
                              f'Can only be one of ["any", "all"].')
         self.any = (any_or_all == 'any')
 
-    def compute_stats(self, sample, context=False):
+    def compute_stats_single(self, sample, context=False):
         # check if it's computed already
         if StatsKeys.video_width in sample[Fields.stats] \
                 and StatsKeys.video_height in sample[Fields.stats]:
@@ -78,9 +78,6 @@ class VideoResolutionFilter(Filter):
             if video_stream is None:
                 return sample
 
-            if not context:
-                video.close()
-
             video_width[video_key] = video_stream.codec_context.width
             video_height[video_key] = video_stream.codec_context.height
 
@@ -92,9 +89,13 @@ class VideoResolutionFilter(Filter):
             video_height[video_key] for video_key in sample[self.video_key]
         ]
 
+        if not context:
+            for vid_key in videos:
+                close_video(videos[vid_key])
+
         return sample
 
-    def process(self, sample):
+    def process_single(self, sample):
         ws = sample[Fields.stats][StatsKeys.video_width]
         hs = sample[Fields.stats][StatsKeys.video_height]
         keep_bools = np.array([

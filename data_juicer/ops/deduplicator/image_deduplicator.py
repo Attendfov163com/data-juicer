@@ -1,26 +1,33 @@
 from collections import defaultdict
-from typing import Dict, Set
+from typing import Dict, Set, Tuple
 
 import numpy as np
 
-from data_juicer.utils.availability_utils import AvailabilityChecking
 from data_juicer.utils.constant import HashKeys
+from data_juicer.utils.lazy_loader import LazyLoader
 from data_juicer.utils.mm_utils import load_data_with_context, load_image
 
 from ..base_op import OPERATORS, Deduplicator
 from ..op_fusion import LOADED_IMAGES
+from .document_deduplicator import DocumentDeduplicator
+
+imgdedup_methods = LazyLoader('imgdedup_methods', 'imagededup.methods')
 
 OP_NAME = 'image_deduplicator'
 
-with AvailabilityChecking(['imagededup'], OP_NAME):
-    from imagededup.methods import AHash, DHash, PHash, WHash
+HASH_METHOD = {'phash', 'dhash', 'whash', 'ahash'}
 
-    HASH_METHOD = {
-        'phash': PHash,
-        'dhash': DHash,
-        'whash': WHash,
-        'ahash': AHash
+
+def get_hash_method(method_name):
+
+    mapping = {
+        'phash': imgdedup_methods.PHash,
+        'dhash': imgdedup_methods.DHash,
+        'whash': imgdedup_methods.WHash,
+        'ahash': imgdedup_methods.AHash
     }
+
+    return mapping[method_name]
 
 
 @OPERATORS.register_module(OP_NAME)
@@ -31,21 +38,34 @@ class ImageDeduplicator(Deduplicator):
     of images between documents.
     """
 
-    def __init__(self, method: str = 'phash', *args, **kwargs):
+    def __init__(self,
+                 method: str = 'phash',
+                 consider_text: bool = False,
+                 *args,
+                 **kwargs):
         """
         Initialization method.
 
         :param method: hash method for image
+        :param consider_text: whether to consider text hash together with image
+            hash when applying deduplication.
         :param args: extra args
         :param kwargs: extra args
         """
         super().__init__(*args, **kwargs)
-        if method not in HASH_METHOD.keys():
+        if method not in HASH_METHOD:
             raise ValueError(f'Keep strategy [{method}] is not supported. '
-                             f'Can only be one of {HASH_METHOD.keys()}.')
-        self.hasher = HASH_METHOD[method]()
+                             f'Can only be one of {HASH_METHOD}.')
+        self.hasher = get_hash_method(method)()
+        self.consider_text = consider_text
+        self.text_dedup_op = None
+        if self.consider_text:
+            self.text_dedup_op = DocumentDeduplicator(**kwargs)
 
     def compute_hash(self, sample, context=False):
+        # get hash of text first
+        if self.consider_text:
+            sample = self.text_dedup_op.compute_hash(sample)
         # check if it's computed already
         if HashKeys.imagehash in sample:
             return sample
@@ -82,8 +102,14 @@ class ImageDeduplicator(Deduplicator):
         dup_hashes = None
         if show_num > 0:
             # sample duplicate pairs
-            hash2ids: Dict[int, Set[int]] = defaultdict(set)
-            for sid, hash_val in enumerate(dataset[HashKeys.imagehash]):
+            if self.consider_text:
+                hash2ids: Dict[Tuple[int, int], Set[int]] = defaultdict(set)
+                hashes = zip(dataset[HashKeys.imagehash],
+                             dataset[HashKeys.hash])
+            else:
+                hash2ids: Dict[int, Set[int]] = defaultdict(set)
+                hashes = dataset[HashKeys.imagehash]
+            for sid, hash_val in enumerate(hashes):
                 if hash_val:
                     hash2ids[hash_val].add(sid)
             dup_samples = sorted(list(hash2ids.items()),
@@ -94,7 +120,10 @@ class ImageDeduplicator(Deduplicator):
             ][:show_num])
 
         def _filter_dup_helper(sample, hashes):
-            hash = sample[HashKeys.imagehash]
+            if self.consider_text:
+                hash = (sample[HashKeys.imagehash], sample[HashKeys.hash])
+            else:
+                hash = sample[HashKeys.imagehash]
             if not hash:
                 return True
             if show_num > 0 and hash in dup_hashes \

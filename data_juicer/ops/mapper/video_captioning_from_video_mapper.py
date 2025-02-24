@@ -1,14 +1,17 @@
+# yapf: disable
 import copy
 import random
+from typing import Optional
 
 import numpy as np
-from jsonargparse.typing import PositiveInt
 from loguru import logger
 from PIL import ImageOps
+from pydantic import PositiveInt
 
-from data_juicer.utils.availability_utils import AvailabilityChecking
 from data_juicer.utils.constant import HashKeys
-from data_juicer.utils.mm_utils import (SpecialTokens, extract_key_frames,
+from data_juicer.utils.lazy_loader import LazyLoader
+from data_juicer.utils.mm_utils import (SpecialTokens, close_video,
+                                        extract_key_frames,
                                         extract_video_frames_uniformly,
                                         insert_texts_after_placeholders,
                                         load_data_with_context, load_video,
@@ -19,33 +22,29 @@ from data_juicer.utils.model_utils import get_model, prepare_model
 from ..base_op import OPERATORS, Mapper
 from ..op_fusion import LOADED_VIDEOS
 
+simhash = LazyLoader('simhash', 'simhash')
+
 OP_NAME = 'video_captioning_from_video_mapper'
-
-with AvailabilityChecking(['torch', 'transformers', 'simhash-pybind'],
-                          OP_NAME):
-
-    import simhash  # noqa: F401
-    import torch
-    import transformers  # noqa: F401
-
-    # avoid hanging when calling clip in multiprocessing
-    torch.set_num_threads(1)
 
 
 @OPERATORS.register_module(OP_NAME)
 @LOADED_VIDEOS.register_module(OP_NAME)
 class VideoCaptioningFromVideoMapper(Mapper):
     """Mapper to generate samples whose captions are generated based on
-    another model and sampled video frame."""
+    a video-to-text model and sampled video frame."""
+
+    _accelerator = 'cuda'
+    _batched_op = True
 
     def __init__(
         self,
-        hf_video_blip='kpyu/video-blip-opt-2.7b-ego4d',
+        hf_video_blip: str = 'kpyu/video-blip-opt-2.7b-ego4d',
+        trust_remote_code: bool = False,
         caption_num: PositiveInt = 1,
         keep_candidate_mode: str = 'random_any',
         keep_original_sample: bool = True,
-        prompt: str = None,
-        prompt_key: str = None,
+        prompt: Optional[str] = None,
+        prompt_key: Optional[str] = None,
         frame_sampling_method: str = 'all_keyframes',
         frame_num: PositiveInt = 3,
         horizontal_flip: bool = False,
@@ -57,23 +56,29 @@ class VideoCaptioningFromVideoMapper(Mapper):
         Initialization method.
 
         :param hf_video_blip: video-blip model name on huggingface
-        to generate caption
+            to generate caption
         :param caption_num: how many candidate captions to generate
-        for each video
+            for each video
         :param keep_candidate_mode: retain strategy for the generated
-        $caption_num$ candidates.
+            $caption_num$ candidates.
+
             'random_any': Retain the random one from generated captions
+
             'similar_one_simhash': Retain the generated one that is most
                 similar to the original caption
+
             'all': Retain all generated captions by concatenation
-        Note: This is a batched_OP, whose input and output type are
+
+        Note:
+            This is a batched_OP, whose input and output type are
             both list. Suppose there are $N$ list of input samples, whose batch
             size is $b$, and denote caption_num as $M$.
             The number of total samples after generation is $2Nb$ when
             keep_original_sample is True and $Nb$ when keep_original_sample is
             False. For 'random_any' and 'similar_one_simhash' mode,
-             it's $(1+M)Nb$ for 'all' mode when keep_original_sample is True
-             and $MNb$ when keep_original_sample is False.
+            it's $(1+M)Nb$ for 'all' mode when keep_original_sample is True
+            and $MNb$ when keep_original_sample is False.
+
         :param keep_original_sample: whether to keep the original sample. If
             it's set to False, there will be only generated captions in the
             final datasets and the original captions will be removed. It's True
@@ -86,8 +91,9 @@ class VideoCaptioningFromVideoMapper(Mapper):
             samples. If it's none, use prompt in parameter "prompt". It's None
             in default.
         :param frame_sampling_method: sampling method of extracting frame
-            videos from the videos. Should be one of ["all_keyframes",
-            "uniform"]. The former one extracts all key frames (the number
+            videos from the videos. Should be one of
+            ["all_keyframes", "uniform"].
+            The former one extracts all key frames (the number
             of which depends on the duration of the video) and the latter
             one extract specified number of frames uniformly from the video.
             Default: "all_keyframes".
@@ -102,10 +108,8 @@ class VideoCaptioningFromVideoMapper(Mapper):
         :param args: extra args
         :param kwargs: extra args
         """
+        kwargs.setdefault('mem_required', '20GB')
         super().__init__(*args, **kwargs)
-
-        self._batched_op = True
-        self._accelerator = 'cuda'
 
         if keep_candidate_mode not in [
                 'random_any', 'similar_one_simhash', 'all'
@@ -149,6 +153,7 @@ class VideoCaptioningFromVideoMapper(Mapper):
         self.model_key = prepare_model(
             model_type='video_blip',
             pretrained_model_name_or_path=hf_video_blip,
+            trust_remote_code=trust_remote_code
         )
 
     def _process_single_sample(self, ori_sample, rank=None, context=False):
@@ -172,7 +177,7 @@ class VideoCaptioningFromVideoMapper(Mapper):
 
         text = sample[self.text_key]
         offset = 0
-        model, processor = get_model(self.model_key, rank=rank)
+        model, processor = get_model(self.model_key, rank, self.use_cuda())
 
         for chunk in text.split(SpecialTokens.eoc):
 
@@ -219,7 +224,6 @@ class VideoCaptioningFromVideoMapper(Mapper):
                         prompt_texts = [self.prompt]
                     else:
                         prompt_texts = None
-
                     inputs = processor(
                         text=prompt_texts,
                         images=video_frame_videos_chunk,
@@ -234,8 +238,12 @@ class VideoCaptioningFromVideoMapper(Mapper):
                         0).permute(0, 2, 1, 3, 4)
                     for i in range(self.caption_num):
                         generated_ids = model.generate(**inputs,
-                                                       do_sample=True).to(
-                                                           model.device)
+                                                       num_beams=4,
+                                                       max_new_tokens=128,
+                                                       temperature=0.7,
+                                                       top_p=0.9,
+                                                       repetition_penalty=1.5,
+                                                       do_sample=True)
                         generated_text = processor.batch_decode(
                             generated_ids, skip_special_tokens=True)
                         generated_text_candidates_single_chunk[
@@ -282,7 +290,7 @@ class VideoCaptioningFromVideoMapper(Mapper):
 
         if not context:
             for vid_key in videos:
-                videos[vid_key].close()
+                close_video(videos[vid_key])
         return generated_samples
 
     def _reduce_captions(self, chunk, generated_text_candidates_single_chunk):
@@ -294,8 +302,6 @@ class VideoCaptioningFromVideoMapper(Mapper):
             generated_text_per_chunk.extend(
                 generated_text_candidates_single_chunk)
         elif self.keep_candidate_mode == 'similar_one_simhash':
-            from simhash import num_differing_bits
-
             from ..deduplicator.document_simhash_deduplicator import \
                 DocumentSimhashDeduplicator
 
@@ -317,7 +323,7 @@ class VideoCaptioningFromVideoMapper(Mapper):
                 for candidate_text in generated_text_candidates_single_chunk
             ]
             hamming_distances = [
-                num_differing_bits(ori_text_hash, generated_text_hash)
+                simhash.num_differing_bits(ori_text_hash, generated_text_hash)
                 for generated_text_hash in generated_text_hashes
             ]
             max_index = min(range(len(hamming_distances)),
@@ -326,16 +332,18 @@ class VideoCaptioningFromVideoMapper(Mapper):
                 generated_text_candidates_single_chunk[max_index])
         return generated_text_per_chunk
 
-    def process(self, samples, rank=None, context=False):
+    def process_batched(self, samples, rank=None, context=False):
         """
-        Note: This is a batched_OP, whose the input and output type are
+        :param samples:
+        :return:
+
+        Note:
+            This is a batched_OP, whose the input and output type are
             both list. Suppose there are $N$ input sample list with batch
             size as $b$, and denote caption_num as $M$.
             the number of total samples after generation is $2Nb$
             for 'random_any' and 'similar_one' mode,
-             and $(1+M)Nb$ for 'all' mode.
-        :param samples:
-        :return:
+            and $(1+M)Nb$ for 'all' mode.
         """
         # reconstruct samples from "dict of lists" to "list of dicts"
         reconstructed_samples = []

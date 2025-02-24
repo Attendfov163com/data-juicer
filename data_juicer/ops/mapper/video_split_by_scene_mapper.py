@@ -2,20 +2,19 @@ import math
 import re
 from itertools import chain
 
-from jsonargparse.typing import NonNegativeFloat, NonNegativeInt
+from pydantic import NonNegativeFloat, NonNegativeInt
 
-from data_juicer.utils.availability_utils import AvailabilityChecking
+from data_juicer.utils.constant import Fields
 from data_juicer.utils.file_utils import (add_suffix_to_filename,
                                           transfer_filename)
+from data_juicer.utils.lazy_loader import LazyLoader
 from data_juicer.utils.mm_utils import SpecialTokens
 
 from ..base_op import OPERATORS, Mapper
 
-OP_NAME = 'video_split_by_scene_mapper'
+scenedetect = LazyLoader('scenedetect', 'scenedetect')
 
-with AvailabilityChecking(['scenedetect[opencv]'], OP_NAME):
-    import scenedetect.detectors
-    from scenedetect import detect, split_video_ffmpeg
+OP_NAME = 'video_split_by_scene_mapper'
 
 
 def replace_func(match, scene_counts_iter):
@@ -81,9 +80,10 @@ class VideoSplitBySceneMapper(Mapper):
             for key in avaliable_kwargs if key in kwargs
         }
 
-    def process(self, sample, context=False):
+    def process_single(self, sample, context=False):
         # there is no video in this sample
         if self.video_key not in sample or not sample[self.video_key]:
+            sample[Fields.source_file] = []
             return sample
 
         # load videos
@@ -100,15 +100,15 @@ class VideoSplitBySceneMapper(Mapper):
             redirected_video_key = transfer_filename(video_key, OP_NAME,
                                                      **self._init_parameters)
             output_template = add_suffix_to_filename(redirected_video_key,
-                                                     '_Scene-$SCENE_NUMBER')
+                                                     '_$SCENE_NUMBER')
 
             # detect scenes
             detector = self.detector_class(self.threshold, self.min_scene_len,
                                            **self.detector_kwargs)
-            scene_list = detect(video_key,
-                                detector,
-                                show_progress=self.show_progress,
-                                start_in_scene=True)
+            scene_list = scenedetect.detect(video_key,
+                                            detector,
+                                            show_progress=self.show_progress,
+                                            start_in_scene=True)
             scene_counts[video_key] = len(scene_list)
 
             if len(scene_list) > 1:
@@ -120,10 +120,11 @@ class VideoSplitBySceneMapper(Mapper):
                     for i in range(len(scene_list))
                 ]
                 # split video into clips
-                split_video_ffmpeg(video_key,
-                                   scene_list,
-                                   output_template,
-                                   show_progress=self.show_progress)
+                scenedetect.split_video_ffmpeg(
+                    input_video_path=video_key,
+                    scene_list=scene_list,
+                    output_file_template=output_template,
+                    show_progress=self.show_progress)
             else:
                 output_video_keys[video_key] = [video_key]
 
@@ -136,6 +137,12 @@ class VideoSplitBySceneMapper(Mapper):
                 lambda match: replace_func(match, scene_counts_iter),
                 sample[self.text_key])
             sample[self.text_key] = updated_text
+
+        # when the file is modified, its source file needs to be updated.
+        sample[Fields.source_file] = []
+        for value in loaded_video_keys:
+            sample[Fields.source_file].extend([value] *
+                                              len(output_video_keys[value]))
 
         sample[self.video_key] = list(
             chain.from_iterable(

@@ -3,9 +3,11 @@ import re
 
 import numpy as np
 
+from data_juicer.utils.constant import Fields
 from data_juicer.utils.file_utils import (add_suffix_to_filename,
                                           transfer_filename)
-from data_juicer.utils.mm_utils import (SpecialTokens, cut_video_by_seconds,
+from data_juicer.utils.mm_utils import (SpecialTokens, close_video,
+                                        cut_video_by_seconds,
                                         get_video_duration, load_video)
 
 from ..base_op import OPERATORS, Mapper
@@ -29,6 +31,8 @@ class VideoSplitByDurationMapper(Mapper):
     """Mapper to split video by duration.
     """
 
+    _batched_op = True
+
     def __init__(self,
                  split_duration: float = 10,
                  min_last_split_duration: float = 0,
@@ -37,6 +41,7 @@ class VideoSplitByDurationMapper(Mapper):
                  **kwargs):
         """
         Initialization method.
+
         :param split_duration: duration of each video split in seconds.
         :param min_last_split_duration: The minimum allowable duration in
             seconds for the last video split. If the duration of the last
@@ -50,7 +55,7 @@ class VideoSplitByDurationMapper(Mapper):
         """
         super().__init__(*args, **kwargs)
         self._init_parameters = self.remove_extra_parameters(locals())
-        self._batched_op = True
+
         self.split_duration = split_duration
         self.min_last_split_duration = min_last_split_duration
         self.keep_original_sample = keep_original_sample
@@ -61,35 +66,39 @@ class VideoSplitByDurationMapper(Mapper):
         timestamps = np.arange(0, video_duration, self.split_duration).tolist()
         count = 0
         split_video_keys = []
+        unique_video_key = transfer_filename(video_key, OP_NAME,
+                                             **self._init_parameters)
         for i in range(1, len(timestamps)):
-            split_video_key = transfer_filename(video_key, OP_NAME,
-                                                **self._init_parameters)
-            suffix = '_split-by-duration-' + str(count)
-            split_video_key = add_suffix_to_filename(split_video_key, suffix)
-            cut_video_by_seconds(container, split_video_key, timestamps[i - 1],
-                                 timestamps[i])
-            split_video_keys.append(split_video_key)
-            count += 1
+            split_video_key = add_suffix_to_filename(unique_video_key,
+                                                     f'_{count}')
+            if cut_video_by_seconds(container, split_video_key,
+                                    timestamps[i - 1], timestamps[i]):
+                split_video_keys.append(split_video_key)
+                count += 1
 
         if video_duration - timestamps[-1] >= self.min_last_split_duration:
-            split_video_key = transfer_filename(video_key, OP_NAME,
-                                                **self._init_parameters)
-            suffix = '_split-by-duration-' + str(count)
-            split_video_key = add_suffix_to_filename(split_video_key, suffix)
-            cut_video_by_seconds(container, split_video_key, timestamps[-1])
-            split_video_keys.append(split_video_key)
+            split_video_key = add_suffix_to_filename(unique_video_key,
+                                                     f'_{count}')
+
+            if cut_video_by_seconds(container, split_video_key,
+                                    timestamps[-1]):
+                split_video_keys.append(split_video_key)
         return split_video_keys
 
     def _process_single_sample(self, sample):
         # there is no video in this sample
-        if self.video_key not in sample \
-                or sample[self.video_key] is None \
-                or len(sample[self.video_key]) == 0:
+        if self.video_key not in sample or sample[
+                self.video_key] is None or len(sample[self.video_key]) == 0:
+            sample[Fields.source_file] = []
             return []
+
+        if Fields.source_file not in sample or not sample[Fields.source_file]:
+            sample[Fields.source_file] = sample[self.video_key]
 
         # the split results
         split_sample = copy.deepcopy(sample)
         split_sample[self.text_key] = ''
+        split_sample[Fields.source_file] = []
 
         # load all video(s)
         loaded_video_keys = sample[self.video_key]
@@ -115,10 +124,12 @@ class VideoSplitByDurationMapper(Mapper):
                     video = videos[video_key]
                     new_video_keys = self.split_videos_by_duration(
                         video_key, video)
-                    video.close()
+                    close_video(video)
                     split_video_keys.extend(new_video_keys)
                     place_holders.append(SpecialTokens.video *
                                          len(new_video_keys))
+                    split_sample[Fields.source_file].extend(
+                        [video_key] * len(new_video_keys))
 
                 # insert the generated text according to given mode
                 replacer_function = create_replacer(place_holders)
@@ -132,7 +143,7 @@ class VideoSplitByDurationMapper(Mapper):
         split_sample[self.video_key] = split_video_keys
         return [split_sample]
 
-    def process(self, samples):
+    def process_batched(self, samples):
         # reconstruct samples from "dict of lists" to "list of dicts"
         reconstructed_samples = []
         for i in range(len(samples[self.text_key])):
@@ -152,5 +163,4 @@ class VideoSplitByDurationMapper(Mapper):
         res_samples = {}
         for key in keys:
             res_samples[key] = [s[key] for s in samples_after_split]
-
         return res_samples

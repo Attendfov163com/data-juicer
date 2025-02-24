@@ -1,8 +1,6 @@
 import numpy as np
-from jsonargparse.typing import ClosedUnitInterval
 from PIL import ImageOps
 
-from data_juicer.utils.availability_utils import AvailabilityChecking
 from data_juicer.utils.constant import Fields, StatsKeys
 from data_juicer.utils.mm_utils import (SpecialTokens, load_data_with_context,
                                         load_image, remove_special_tokens)
@@ -13,13 +11,6 @@ from ..op_fusion import LOADED_IMAGES
 
 OP_NAME = 'image_text_matching_filter'
 
-with AvailabilityChecking(['torch', 'transformers'], OP_NAME):
-    import torch
-    import transformers  # noqa: F401
-
-    # avoid hanging when calling blip in multiprocessing
-    torch.set_num_threads(1)
-
 
 @OPERATORS.register_module(OP_NAME)
 @LOADED_IMAGES.register_module(OP_NAME)
@@ -27,10 +18,13 @@ class ImageTextMatchingFilter(Filter):
     """Filter to keep samples those matching score between image and text
     within a specific range."""
 
+    _accelerator = 'cuda'
+
     def __init__(self,
-                 hf_blip='Salesforce/blip-itm-base-coco',
-                 min_score: ClosedUnitInterval = 0.003,
-                 max_score: ClosedUnitInterval = 1.0,
+                 hf_blip: str = 'Salesforce/blip-itm-base-coco',
+                 trust_remote_code: bool = False,
+                 min_score: float = 0.003,
+                 max_score: float = 1.0,
                  horizontal_flip: bool = False,
                  vertical_flip: bool = False,
                  any_or_all: str = 'any',
@@ -58,6 +52,7 @@ class ImageTextMatchingFilter(Filter):
         :param args: extra args
         :param kwargs: extra args
         """
+        kwargs.setdefault('mem_required', '1500MB')
         super().__init__(*args, **kwargs)
         self.min_score = min_score
         self.max_score = max_score
@@ -69,13 +64,13 @@ class ImageTextMatchingFilter(Filter):
                              f'Can only be one of ["any", "all"].')
         self.any = (any_or_all == 'any')
         self.model_key = prepare_model(model_type='huggingface',
-                                       pretrained_model_name_or_path=hf_blip)
-        self._accelerator = 'cuda'
+                                       pretrained_model_name_or_path=hf_blip,
+                                       trust_remote_code=trust_remote_code)
         self.reduce_mode = reduce_mode
         self.horizontal_flip = horizontal_flip
         self.vertical_flip = vertical_flip
 
-    def compute_stats(self, sample, rank=None, context=False):
+    def compute_stats_single(self, sample, rank=None, context=False):
         # check if it's computed already
         if StatsKeys.image_text_matching_score in sample[Fields.stats]:
             return sample
@@ -95,7 +90,7 @@ class ImageTextMatchingFilter(Filter):
         text = sample[self.text_key]
         offset = 0
         matching_scores = []
-        model, processor = get_model(self.model_key, rank=rank)
+        model, processor = get_model(self.model_key, rank, self.use_cuda())
 
         for chunk in text.split(SpecialTokens.eoc):
             count = chunk.count(SpecialTokens.image)
@@ -140,7 +135,7 @@ class ImageTextMatchingFilter(Filter):
 
         return sample
 
-    def process(self, sample, rank=None):
+    def process_single(self, sample, rank=None):
         itm_scores = sample[Fields.stats][StatsKeys.image_text_matching_score]
         if len(itm_scores) <= 0:
             return True

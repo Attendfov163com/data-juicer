@@ -1,70 +1,46 @@
 import os
-from functools import partial
+import shutil
+import time
 
-import pandas as pd
-import pyarrow as pa
 from loguru import logger
 
 from data_juicer.config import init_configs
-from data_juicer.ops import Filter, Mapper, load_ops
-from data_juicer.utils.availability_utils import AvailabilityChecking
-from data_juicer.utils.constant import Fields
+from data_juicer.core.ray_data import RayDataset
+from data_juicer.ops import load_ops
+from data_juicer.ops.op_fusion import fuse_operators
+from data_juicer.utils.lazy_loader import LazyLoader
 
-with AvailabilityChecking(['ray'], requires_type='dist'):
-    import ray
-    import ray.data as rd
+from .adapter import Adapter
 
-
-def is_valid_path(item, dataset_dir):
-    full_path = os.path.abspath(os.path.join(dataset_dir, item))
-    return os.path.exists(full_path)
+ray = LazyLoader('ray', 'ray')
+rd = LazyLoader('rd', 'ray.data')
 
 
-def convert_to_absolute_paths(dict_with_paths, dataset_dir):
-    for key, value in dict_with_paths.items():
-        if isinstance(value, list):
-            dict_with_paths[key] = [
-                os.path.abspath(os.path.join(dataset_dir, item))
-                if isinstance(item, str) and is_valid_path(dataset_dir, item)
-                else item for item in value
-            ]
-        elif isinstance(value, str):
-            dict_with_paths[key] = os.path.abspath(
-                os.path.join(
-                    dataset_dir,
-                    value)) if isinstance(value, str) and is_valid_path(
-                        value, dataset_dir) else value
-    return dict_with_paths
+class TempDirManager:
 
+    def __init__(self, tmp_dir):
+        self.tmp_dir = tmp_dir
 
-def set_dataset_to_absolute_path(dataset, dataset_path):
-    """
-    Set all the path in input data to absolute path.
-    Checks dataset_dir and project_dir for valid paths.
-    """
-    dataset_dir = os.path.dirname(dataset_path)
-    dataset = dataset.map(
-        lambda item: convert_to_absolute_paths(item, dataset_dir))
-    print(f"transfer {dataset.count()} sample's paths")
-    return dataset
+    def __enter__(self):
+        os.makedirs(self.tmp_dir, exist_ok=True)
+        return self
 
-
-def ray_batch_mapper_wrapper(samples, fn):
-    samples = samples.to_pandas()
-    res = fn(samples)
-    if not isinstance(res, pd.DataFrame):
-        res = pd.DataFrame(res)
-    return pa.Table.from_pandas(res)
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if os.path.exists(self.tmp_dir):
+            logger.info(f'Removing tmp dir {self.tmp_dir} ...')
+            shutil.rmtree(self.tmp_dir)
 
 
 class RayExecutor:
     """
-    Executor based on Ray [Experimental].
+    Executor based on Ray.
 
     Run Data-Juicer data processing in a distributed cluster.
-        1. Only support Filter and Mapper operators for now.
+
+        1. Support Filter, Mapper and Exact Deduplicator operators for now.
         2. Only support loading `.json` files.
-        2. Advanced functions such as checkpoint, tracer are not supported.
+        3. Advanced functions such as checkpoint, tracer are not supported.
+
     """
 
     def __init__(self, cfg=None):
@@ -77,11 +53,13 @@ class RayExecutor:
 
         self.work_dir = self.cfg.work_dir
 
-        self.ops = None
+        self.adapter = Adapter(self.cfg)
+
         # init ray
         logger.info('Initing Ray ...')
         ray.init(self.cfg.ray_address)
-        self.process_list = self.cfg.process
+        self.tmp_dir = os.path.join(self.work_dir, '.tmp',
+                                    ray.get_runtime_context().get_job_id())
 
     def run(self, load_data_np=None):
         """
@@ -92,58 +70,43 @@ class RayExecutor:
         """
         # 1. load data
         logger.info('Loading dataset with Ray...')
-        dataset = rd.read_json(self.cfg.dataset_path)
+
+        if self.cfg.get('generated_dataset_config', None):
+            generated_dataset_config = self.cfg.generated_dataset_config
+            assert isinstance(generated_dataset_config,
+                              dict) and 'type' in generated_dataset_config
+            args = generated_dataset_config.copy()
+            obj_name = args.pop('type')
+            from data_juicer.format.formatter import FORMATTERS
+            dataset = FORMATTERS.modules[obj_name](**args).load_dataset()
+        else:
+            dataset = RayDataset.read_json(self.cfg.dataset_path)
 
         # convert all the path in dataset to absolute path
-        dataset = set_dataset_to_absolute_path(dataset, self.cfg.dataset_path)
-        for items in dataset.iter_rows():
-            print('item is:', items)
+        dataset = RayDataset(dataset, self.cfg.dataset_path, self.cfg)
         # 2. extract processes
         logger.info('Preparing process operators...')
-        self.process_list, self.ops = load_ops(self.cfg.process,
-                                               self.cfg.op_fusion)
+        ops = load_ops(self.cfg.process)
 
-        # 3. data process
-        # - If tracer is open, trace each op after it's processed
-        # - If checkpoint is open, clean the cache files after each process
-        if Fields.stats not in dataset.columns(fetch_if_missing=False):
-            logger.info(f'columns {dataset.columns(fetch_if_missing=False)}')
+        if self.cfg.op_fusion:
+            probe_res = None
+            if self.cfg.fusion_strategy == 'probe':
+                logger.info('Probe the OP speed for OP reordering...')
+                probe_res, _ = self.adapter.probe_small_batch(dataset, ops)
 
-            def process_batch_arrow(table: pa.Table) -> pa.Table:
-                new_column_data = [{} for _ in range(len(table))]
-                new_talbe = table.append_column(Fields.stats,
-                                                [new_column_data])
-                return new_talbe
+            logger.info(f'Start OP fusion and reordering with strategy '
+                        f'[{self.cfg.fusion_strategy}]...')
+            ops = fuse_operators(ops, probe_res)
 
-            dataset = dataset.map_batches(process_batch_arrow,
-                                          batch_format='pyarrow')
+        with TempDirManager(self.tmp_dir):
+            # 3. data process
+            logger.info('Processing data...')
+            tstart = time.time()
+            dataset.process(ops)
 
-        logger.info('Processing data...')
-        for op_cfg, op in zip(self.process_list, self.ops):
-            op_name, _ = list(op_cfg.items())[0]
-            try:
-                if isinstance(op, Mapper):
-                    if op.is_batched_op():
-                        dataset = dataset.map_batches(partial(
-                            ray_batch_mapper_wrapper, fn=op.process),
-                                                      batch_format='pyarrow')
-                    else:
-                        dataset = dataset.map(op.process)
-                elif isinstance(op, Filter):
-                    dataset = dataset.map(op.compute_stats)
-                    dataset = dataset.filter(op.process)
-                else:
-                    logger.error(
-                        'Ray executor only support Filter and Mapper OPs for '
-                        'now')
-                    raise NotImplementedError
-            except:  # noqa: E722
-                logger.error(f'An error occurred during Op [{op_name}].')
-                import traceback
-                traceback.print_exc()
-                exit(1)
-
-        # 4. data export
-        logger.info('Exporting dataset to disk...')
-        dataset.write_json(self.cfg.export_path, force_ascii=False)
+            # 4. data export
+            logger.info('Exporting dataset to disk...')
+            dataset.data.write_json(self.cfg.export_path, force_ascii=False)
+            tend = time.time()
+            logger.info(f'All Ops are done in {tend - tstart:.3f}s.')
         return dataset

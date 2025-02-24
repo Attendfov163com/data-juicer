@@ -1,9 +1,11 @@
 import copy
 import os
+from typing import Optional
 
 from PIL import Image
+from pydantic import Field, PositiveInt
+from typing_extensions import Annotated
 
-from data_juicer.utils.availability_utils import AvailabilityChecking
 from data_juicer.utils.constant import Fields
 from data_juicer.utils.file_utils import transfer_filename
 from data_juicer.utils.mm_utils import (SpecialTokens, load_data_with_context,
@@ -15,16 +17,6 @@ from ..op_fusion import LOADED_IMAGES
 
 OP_NAME = 'image_diffusion_mapper'
 
-check_list = ['diffusers', 'torch', 'transformers', 'simhash-pybind']
-with AvailabilityChecking(check_list, OP_NAME):
-    import diffusers  # noqa: F401
-    import simhash  # noqa: F401
-    import torch
-    import transformers  # noqa: F401
-
-    # avoid hanging when calling stable diffusion in multiprocessing
-    torch.set_num_threads(1)
-
 
 @OPERATORS.register_module(OP_NAME)
 @LOADED_IMAGES.register_module(OP_NAME)
@@ -33,15 +25,20 @@ class ImageDiffusionMapper(Mapper):
         Generate image by diffusion model
     """
 
+    _accelerator = 'cuda'
+    _batched_op = True
+
     def __init__(self,
                  hf_diffusion: str = 'CompVis/stable-diffusion-v1-4',
-                 floating_point: str = 'fp32',
-                 strength: float = 0.8,
+                 trust_remote_code: bool = False,
+                 torch_dtype: str = 'fp32',
+                 revision: str = 'main',
+                 strength: Annotated[float, Field(ge=0, le=1)] = 0.8,
                  guidance_scale: float = 7.5,
-                 aug_num: int = 1,
+                 aug_num: PositiveInt = 1,
                  keep_original_sample: bool = True,
-                 caption_key: str = None,
-                 hf_img2seq='Salesforce/blip2-opt-2.7b',
+                 caption_key: Optional[str] = None,
+                 hf_img2seq: str = 'Salesforce/blip2-opt-2.7b',
                  *args,
                  **kwargs):
         """
@@ -49,8 +46,11 @@ class ImageDiffusionMapper(Mapper):
 
         :param hf_diffusion: diffusion model name on huggingface to generate
             the image.
-        :param floating_point: the floating point used to load the diffusion
-            model.
+        :param torch_dtype: the floating point type used to load the diffusion
+            model. Can be one of ['fp32', 'fp16', 'bf16']
+        :param revision: The specific model version to use. It can be a
+            branch name, a tag name, a commit id, or any identifier allowed
+            by Git.
         :param strength: Indicates extent to transform the reference image.
             Must be between 0 and 1. image is used as a starting point and
             more noise is added the higher the strength. The number of
@@ -65,19 +65,25 @@ class ImageDiffusionMapper(Mapper):
         :param aug_num: The image number to be produced by stable-diffusion
             model.
         :param keep_candidate_mode: retain strategy for the generated
-        $caption_num$ candidates.
+            $caption_num$ candidates.
+
             'random_any': Retain the random one from generated captions
+
             'similar_one_simhash': Retain the generated one that is most
                 similar to the original caption
+
             'all': Retain all generated captions by concatenation
-        Note: This is a batched_OP, whose input and output type are
+
+        Note:
+            This is a batched_OP, whose input and output type are
             both list. Suppose there are $N$ list of input samples, whose batch
             size is $b$, and denote caption_num as $M$.
             The number of total samples after generation is $2Nb$ when
             keep_original_sample is True and $Nb$ when keep_original_sample is
             False. For 'random_any' and 'similar_one_simhash' mode,
-             it's $(1+M)Nb$ for 'all' mode when keep_original_sample is True
-             and $MNb$ when keep_original_sample is False.
+            it's $(1+M)Nb$ for 'all' mode when keep_original_sample is True
+            and $MNb$ when keep_original_sample is False.
+
         :param caption_key: the key name of fields in samples to store captions
             for each images. It can be a string if there is only one image in
             each sample. Otherwise, it should be a list. If it's none,
@@ -85,10 +91,9 @@ class ImageDiffusionMapper(Mapper):
         :param hf_img2seq: model name on huggingface to generate caption if
             caption_key is None.
         """
+        kwargs.setdefault('mem_required', '8GB')
         super().__init__(*args, **kwargs)
         self._init_parameters = self.remove_extra_parameters(locals())
-        self._batched_op = True
-        self._accelerator = 'cuda'
         self.strength = strength
         self.guidance_scale = guidance_scale
         self.aug_num = aug_num
@@ -101,19 +106,22 @@ class ImageDiffusionMapper(Mapper):
                 hf_img2seq=hf_img2seq,
                 keep_original_sample=False,
                 prompt=self.prompt)
-
         self.model_key = prepare_model(
             model_type='diffusion',
             pretrained_model_name_or_path=hf_diffusion,
             diffusion_type='image2image',
-            floating_point=floating_point)
+            torch_dtype=torch_dtype,
+            revision=revision,
+            trust_remote_code=trust_remote_code)
 
     def _real_guidance(self, caption: str, image: Image.Image, rank=None):
 
         canvas = image.resize((512, 512), Image.BILINEAR)
         prompt = caption
 
-        diffusion_model = get_model(model_key=self.model_key, rank=rank)
+        diffusion_model = get_model(model_key=self.model_key,
+                                    rank=rank,
+                                    use_cuda=self.use_cuda())
 
         kwargs = dict(image=canvas,
                       prompt=[prompt],
@@ -163,7 +171,8 @@ class ImageDiffusionMapper(Mapper):
                 self.text_key: [SpecialTokens.image] * len(images),
                 self.image_key: [[k] for k in loaded_image_keys]
             }
-            caption_samples = self.op_generate_caption.process(caption_samples)
+            caption_samples = self.op_generate_caption.process(caption_samples,
+                                                               rank=rank)
             captions = caption_samples[self.text_key]
             captions = [
                 self.prompt + remove_special_tokens(c) for c in captions
@@ -197,12 +206,14 @@ class ImageDiffusionMapper(Mapper):
 
         return generated_samples
 
-    def process(self, samples, rank=None, context=False):
+    def process_batched(self, samples, rank=None, context=False):
         """
-            Note: This is a batched_OP, whose the input and output type are
+            Note:
+                This is a batched_OP, whose the input and output type are
                 both list. Suppose there are $N$ input sample list with batch
                 size as $b$, and denote aug_num as $M$.
                 the number of total samples after generation is  $(1+M)Nb$.
+
             :param samples:
             :return:
         """

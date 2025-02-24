@@ -2,11 +2,13 @@ English | [中文页面](DJ_SORA_ZH.md)
 
 ---
 
-Data is the key to the unprecedented development of large multi-modal models such as SORA. How to obtain and process data efficiently and scientifically faces new challenges! DJ-SORA aims to create a series of large-scale, high-quality open source multi-modal data sets to assist the open source community in data understanding and model training.
+Data is the key to the unprecedented development of large multi-modal models such as SORA. How to obtain and process data efficiently and scientifically faces new challenges! DJ-SORA aims to create a series of large-scale, high-quality open-source multi-modal data sets to assist the open-source community in data understanding and model training.
 
-DJ-SORA is based on Data-Juicer (including hundreds of dedicated video, image, audio, text and other multi-modal data processing [operators](Operators_ZH.md) and tools) to form a series of systematic and reusable Multimodal "data recipes" for analyzing, cleaning, and generating large-scale, high-quality multimodal data.
+DJ-SORA is based on Data-Juicer (including hundreds of dedicated video, image, audio, text and other multi-modal data processing [operators](Operators.md) and tools) to form a series of systematic and reusable Multimodal "data recipes" for analyzing, cleaning, and generating large-scale, high-quality multimodal data.
 
 This project is being actively updated and maintained. We eagerly invite you to participate and jointly create a more open and higher-quality multi-modal data ecosystem to unleash the unlimited potential of large models!
+
+![Overview](https://img.alicdn.com/imgextra/i2/O1CN01YMO2p31MsT5PKu7fh_!!6000000001490-0-tps-2134-1518.jpg)
 
 # Motivation
 - SORA only briefly mentions using DALLE-3 to generate captions and can handle varying durations, resolutions and aspect ratios.
@@ -18,12 +20,12 @@ This project is being actively updated and maintained. We eagerly invite you to 
 
 # Roadmap
 ## Overview
-* [Support high-performance loading and processing of video data](#Support high-performance loading and processing of video data)
-* [Basic Operators (video spatio-temporal dimension)](#Basic operator video spatio-temporal dimension)
-* [Advanced Operators (fine-grained modal matching and data generation)](#Advanced operators fine-grained modal matching and data generation)
-* [Advanced Operators (Video Content)](#Advanced Operator Video Content)
-* [DJ-SORA Data Recipes and Datasets](#DJ-SORA Data Recipes and Datasets)
-* [DJ-SORA Data Validation and Model Training](#DJ-SORA Data Validation and Model Training)
+* [Support high-performance loading and processing of video data](#support-high-performance-loading-and-processing-of-video-data)
+* [Basic Operators (video spatio-temporal dimension)](#basic-operators-video-spatio-temporal-dimension)
+* [Advanced Operators (fine-grained modal matching and data generation)](#advanced-operators-fine-grained-modal-matching-and-data-generation)
+* [Advanced Operators (Video Content)](#advanced-operators-video-content)
+* [DJ-SORA Data Recipes and Datasets](#dj-sora-data-recipes-and-datasets)
+* [DJ-SORA Data Validation and Model Training](#dj-sora-data-validation-and-model-training)
 
 
 ## Support high-performance loading and processing of video data
@@ -34,8 +36,10 @@ This project is being actively updated and maintained. We eagerly invite you to 
    - [✅] Support single machine multicore running
    - [✅] GPU utilization
    - [✅] Ray based multi-machine distributed running
-- [ ] [WIP] Distributed scheduling optimization (OP-aware, automated load balancing) --> Aliyun PAI-DLC
-- [ ] [WIP] Distributed storage optimization
+   - [✅] Aliyun PAI-DLC & Slurm based multi-machine distributed running
+- [✅] Distributed scheduling optimization (OP-aware, automated load balancing) --> Aliyun PAI-DLC
+- [WIP] Low precision acceleration support for video related operators. (git tags: dj_op, dj_efficiency)
+- [WIP] SOTA model enhancement of existing video related operators. (git tags: dj_op, dj_sota_models)
 
 ## Basic Operators (video spatio-temporal dimension)
 - Towards Data Quality
@@ -56,11 +60,11 @@ This project is being actively updated and maintained. We eagerly invite you to 
   - [✅] video_frames_text_similarity_filter (enhancement in the spatiotemporal consistency dimension, calculating the matching score of key/specified frames and text)
 - Towards Diversity & Quantity
   - [✅] video_tagging_from_frames_mapper (with lightweight image-to-text models, spatial summary information from dense frames)
-  - [ ] [WIP] video_captioning_from_frames_mapper (heavier image-to-text models, generating more detailed spatial information from fewer frames)
+  - [✅] video_captioning_from_frames_mapper (heavier image-to-text models, generating more detailed spatial information from fewer frames)
   - [✅] video_tagging_from_audio_mapper (introducing audio classification/category and other meta information)
   - [✅] video_captioning_from_audio_mapper (incorporating voice/dialogue information; AudioCaption for environmental and global context)
   - [✅] video_captioning_from_video_mapper (video-to-text model, generating spacetime information from continuous frames)
-  - [ ] [WIP] video_captioning_from_summarizer_mapper (combining the above sub-abilities, using pure text large models for denoising and summarizing different types of caption information)
+  - [✅] video_captioning_from_summarizer_mapper (combining the above sub-abilities, using pure text large models for denoising and summarizing different types of caption information)
   - [ ] [WIP] video_interleaved_mapper (enhancement in ICL, temporal, and cross-modal dimensions), `interleaved_modes` include:
     - text_image_interleaved (placing captions and frames of the same video in temporal order)
     - text_audio_interleaved (placing ASR text and frames of the same video in temporal order)
@@ -71,11 +75,11 @@ This project is being actively updated and maintained. We eagerly invite you to 
 - [✅] Compatibility with existing ffmpeg video commands
   - audio_ffmpeg_wrapped_mapper 
   - video_ffmpeg_wrapped_mapper
-- [WIP] Video content compliance and privacy protection operators (image, text, audio):
+- [✅] Video content compliance and privacy protection operators (image, text, audio):
   - [✅] Mosaic
-  - [ ] Copyright watermark
-  - [ ] Face blurring
-  - [ ] Violence and Adult Content
+  - [✅] Copyright watermark
+  - [✅] Face blurring
+  - [✅] Violence and Adult Content
 - [ ] [TODO] (Beyond Interpolation) Enhancing data authenticity and density
   - Collisions, lighting, gravity, 3D, scene and phase transitions, depth of field, etc.
   - [ ] Filter-type operators: whether captions describe authenticity, relevance scoring/correctness of that description
@@ -83,24 +87,28 @@ This project is being actively updated and maintained. We eagerly invite you to 
   - [ ] ...
 ## DJ-SORA Data Recipes and Datasets
 - Support for unified loading and conversion of representative datasets (other-data <-> dj-data), facilitating DJ operator processing and dataset expansion.
-  - [✅] **Video-ChatGPT**: 100k video-instruction data: `{<question, answer, youtube_id>}`
+  - [✅] **Video-ChatGPT**: 100K video-instruction data: `{<question, answer, youtube_id>}`
   - [✅] **Youku-mPLUG-CN**: 36TB video-caption data: `{<caption, video_id>}`
   - [✅] **InternVid**: 234M data sample: `{<caption, youtube_id, start/end_time>}`
-  - [ ] VideoInstruct-100K, Panda70M, MSR-VTT, ......
-  - [ ] ModelScope's datasets integration
+  - [✅] **MSR-VTT**: 10K video-caption data: `{<caption, video_id>}`
+  - [✅] ModelScope's datasets integration
+  - [✅] VideoInstruct-100K, Panda70M, ......
 - [ ] Large-scale high-quality DJ-SORA dataset
-   - [ ] [WIP] Continuous expansion of data sources: open-datasets, Youku, web, ...
-  - [ ] [WIP] (Data sandbox) Building and optimizing multimodal data recipes with DJ-video operators (which are also being continuously extended and improved).
-  - [ ] [WIP] Large-scale analysis and cleaning of high-quality multimodal datasets based on DJ recipes
-  - [ ] [WIP] Large-scale generation of high-quality multimodal datasets based on DJ recipes.
+  - [✅] (Data sandbox) Building and optimizing multimodal data recipes with DJ-video operators (which are also being continuously extended and improved).
+  - [✅] Continuous expansion of data sources: open-datasets, Youku, web, ...
+  - [ ] Large-scale analysis, cleaning, and generation of high-quality multimodal datasets based on DJ recipes (OpenVideos, ...)
+    - [WIP] broad scenarios, high-dynamic
   - ...
 
 ## DJ-SORA Data Validation and Model Training
-  - [ ] [WIP] Exploring and refining multimodal data evaluation metrics and techniques, establishing benchmarks and insights.
+  - [ ] Exploring and refining the collaborative development of multimodal data and model, establishing benchmarks and insights. [paper](https://arxiv.org/abs/2407.11784)
   - [ ] [WIP] Integration of SORA-like model training pipelines
-    - VideoDIT
-    - VQVAE
+    - [EasyAnimate](https://github.com/aigc-apps/EasyAnimate)
+    - [✅] [T2V](https://t2v-turbo.github.io/)
+    - [✅] [V-Bench](https://vchitect.github.io/VBench-project/)
     - ...
-  - [ ] [WIP] (Model-Data sandbox) With relatively small models and the DJ-SORA dataset, exploring low-cost, transferable, and instructive data-model co-design, configurations and checkpoints. 
-  - [ ] Training SORA-like models with DJ-SORA data on  larger scales and in more scenarios to improve model performance.
+  - [✅] (Model-Data sandbox) With relatively small models and the DJ-SORA dataset, exploring low-cost, transferable, and instructive data-model co-design, configurations and checkpoints. 
+  - [ ] [WIP] Training SORA-like models with DJ-SORA data on  larger scales and in more scenarios to improve model performance.
+    - [✅] Data-Juicer-T2V, [V-Bench Top1 model](https://huggingface.co/datajuicer/Data-Juicer-T2V-v2). Please refer [here](./Sandbox.md) for more details.
+    - ...
   - ...

@@ -1,12 +1,11 @@
 from typing import List
 
 import numpy as np
-from jsonargparse.typing import ClosedUnitInterval
 from loguru import logger
 from PIL import ImageOps
 
-from data_juicer.utils.availability_utils import AvailabilityChecking
 from data_juicer.utils.constant import Fields, StatsKeys
+from data_juicer.utils.lazy_loader import LazyLoader
 from data_juicer.utils.mm_utils import (SpecialTokens, iou,
                                         load_data_with_context, load_image,
                                         remove_special_tokens)
@@ -15,17 +14,10 @@ from data_juicer.utils.model_utils import get_model, prepare_model
 from ..base_op import OPERATORS, Filter
 from ..op_fusion import LOADED_IMAGES
 
+torch = LazyLoader('torch', 'torch')
+nltk = LazyLoader('nltk', 'nltk')
+
 OP_NAME = 'phrase_grounding_recall_filter'
-
-with AvailabilityChecking(['torch', 'transformers', 'nltk'], OP_NAME):
-
-    import torch
-    import transformers  # noqa: F401
-
-    # avoid hanging when calling clip in multiprocessing
-    torch.set_num_threads(1)
-
-    import nltk
 
 
 # NER algorithm adapted from GLIP starts
@@ -74,17 +66,20 @@ class PhraseGroundingRecallFilter(Filter):
     """Filter to keep samples whose locating recalls of phrases extracted
     from text in the images are within a specified range."""
 
+    _accelerator = 'cuda'
+
     def __init__(self,
-                 hf_owlvit='google/owlvit-base-patch32',
-                 min_recall: ClosedUnitInterval = 0.1,
-                 max_recall: ClosedUnitInterval = 1.0,
+                 hf_owlvit: str = 'google/owlvit-base-patch32',
+                 trust_remote_code: bool = False,
+                 min_recall: float = 0.1,
+                 max_recall: float = 1.0,
                  horizontal_flip: bool = False,
                  vertical_flip: bool = False,
                  any_or_all: str = 'any',
                  reduce_mode: str = 'avg',
-                 iou_thr: ClosedUnitInterval = 0.5,
-                 large_area_ratio_thr: ClosedUnitInterval = 0.95,
-                 conf_thr: ClosedUnitInterval = 0.0,
+                 iou_thr: float = 0.5,
+                 large_area_ratio_thr: float = 0.95,
+                 conf_thr: float = 0.0,
                  *args,
                  **kwargs):
         """
@@ -119,6 +114,7 @@ class PhraseGroundingRecallFilter(Filter):
         :param args: extra args
         :param kwargs: extra args
         """
+        kwargs.setdefault('mem_required', '1GB')
         super().__init__(*args, **kwargs)
         self.min_recall = min_recall
         self.max_recall = max_recall
@@ -130,8 +126,8 @@ class PhraseGroundingRecallFilter(Filter):
                              f'Can only be one of ["any", "all"].')
         self.any = (any_or_all == 'any')
         self.model_key = prepare_model(model_type='huggingface',
-                                       pretrained_model_name_or_path=hf_owlvit)
-        self._accelerator = 'cuda'
+                                       pretrained_model_name_or_path=hf_owlvit,
+                                       trust_remote_code=trust_remote_code)
         self.reduce_mode = reduce_mode
         self.horizontal_flip = horizontal_flip
         self.vertical_flip = vertical_flip
@@ -145,7 +141,7 @@ class PhraseGroundingRecallFilter(Filter):
         for nltk_data_pkg in requires_nltk_data:
             nltk.download(nltk_data_pkg)
 
-    def compute_stats(self, sample, rank=None, context=False):
+    def compute_stats_single(self, sample, rank=None, context=False):
         # check if it's computed already
         if StatsKeys.phrase_grounding_recall in sample[Fields.stats]:
             return sample
@@ -164,7 +160,7 @@ class PhraseGroundingRecallFilter(Filter):
         text = sample[self.text_key]
         offset = 0
         recalls = []
-        model, processor = get_model(self.model_key, rank=rank)
+        model, processor = get_model(self.model_key, rank, self.use_cuda())
 
         for chunk in text.split(SpecialTokens.eoc):
             count = chunk.count(SpecialTokens.image)
@@ -259,7 +255,7 @@ class PhraseGroundingRecallFilter(Filter):
 
         return sample
 
-    def process(self, sample):
+    def process_single(self, sample):
         recalls = sample[Fields.stats][StatsKeys.phrase_grounding_recall]
         if len(recalls) <= 0:
             return True

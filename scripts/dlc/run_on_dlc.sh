@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# paremeters
+# parameters
 datajuicer_path= # path to data-juicer
 config_path= # path to config file
 
@@ -34,6 +34,14 @@ if grep -q "dataset_path: .*\.json" "$new_config_file"; then
 else
     # dir dataset_path
     sed -i$SED_I_SUFFIX "s|\(dataset_path: '\)\(.*\)'\(.*\)|\1\2_$hostname'\3|" "$new_config_file"
+fi
+
+if grep -q "export_path: .*\.json" "$new_config_file"; then
+    # .json data_path
+    sed -i$SED_I_SUFFIX "s|\(export_path: \)\(.*\)\(/[^/]*\)\(.json\)|\1\2\3_$hostname\4|" "$new_config_file"
+else
+    # dir export_path
+    sed -i$SED_I_SUFFIX "s|\(export_path: '\)\(.*\)'\(.*\)|\1\2_$hostname'\3|" "$new_config_file"
 fi
 
 # run to process data

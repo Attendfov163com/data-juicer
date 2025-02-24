@@ -1,5 +1,5 @@
 from itertools import chain, repeat
-from typing import List, Tuple, Union
+from typing import List, Union
 
 import numpy as np
 from datasets import Dataset, concatenate_datasets
@@ -10,12 +10,12 @@ from .formatter import BaseFormatter, load_formatter
 
 class MixtureFormatter(BaseFormatter):
     """The class mixes multiple datasets by randomly selecting samples from
-    every dataset and merging them, and then exports the merged datasset as a
+    every dataset and merging them, and then exports the merged dataset as a
     new mixed dataset."""
 
     def __init__(self,
                  dataset_path: str,
-                 suffixes: Union[str, List[str], Tuple[str]] = None,
+                 suffixes: Union[str, List[str], None] = None,
                  text_keys=None,
                  add_suffix=False,
                  max_samples=None,
@@ -88,7 +88,8 @@ class MixtureFormatter(BaseFormatter):
                 prefixes.append(value)
         return prefixes, weights
 
-    def _random_sample(self, dataset, weight=1.0, sample_number=0, seed=None):
+    @classmethod
+    def random_sample(cls, dataset, weight=1.0, sample_number=0, seed=None):
         """
         Randomly sample a subset from a dataset with weight or number,
         if sample number is bigger than 0, we will use sample
@@ -132,7 +133,7 @@ class MixtureFormatter(BaseFormatter):
                                                  self.sample_numbers,
                                                  self.formatters):
             dataset = formatter.load_dataset(num_proc, global_cfg)
-            sampled = self._random_sample(dataset, weight, sample_num)
+            sampled = self.random_sample(dataset, weight, sample_num)
             logger.info(f'sampled {len(sampled)} from '
                         f'{len(dataset)}')
             dataset_list.append(sampled)

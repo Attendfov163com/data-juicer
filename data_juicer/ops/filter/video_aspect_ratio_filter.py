@@ -3,7 +3,8 @@ from fractions import Fraction
 import numpy as np
 
 from data_juicer.utils.constant import Fields, StatsKeys
-from data_juicer.utils.mm_utils import load_data_with_context, load_video
+from data_juicer.utils.mm_utils import (close_video, load_data_with_context,
+                                        load_video)
 
 from ..base_op import OPERATORS, Filter
 from ..op_fusion import LOADED_VIDEOS
@@ -44,7 +45,7 @@ class VideoAspectRatioFilter(Filter):
                              f'Can only be one of ["any", "all"].')
         self.any = (any_or_all == 'any')
 
-    def compute_stats(self, sample, context=False):
+    def compute_stats_single(self, sample, context=False):
         # check if it's computed already
         if StatsKeys.video_aspect_ratios in sample[Fields.stats]:
             return sample
@@ -64,11 +65,10 @@ class VideoAspectRatioFilter(Filter):
         video_aspect_ratios = {}
         for key, video in videos.items():
             stream = video.streams.video[0]
-            video_aspect_ratios[key] = str(
-                Fraction(stream.codec_context.width,
-                         stream.codec_context.height))
+            video_aspect_ratios[
+                key] = stream.codec_context.width / stream.codec_context.height
             if not context:
-                video.close()
+                close_video(video)
 
         sample[Fields.stats][StatsKeys.video_aspect_ratios] = [
             video_aspect_ratios[key] for key in loaded_video_keys
@@ -76,7 +76,7 @@ class VideoAspectRatioFilter(Filter):
 
         return sample
 
-    def process(self, sample):
+    def process_single(self, sample):
         video_aspect_ratios = sample[Fields.stats][
             StatsKeys.video_aspect_ratios]
 

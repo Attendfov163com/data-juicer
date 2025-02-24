@@ -1,24 +1,25 @@
-from data_juicer.utils.availability_utils import AvailabilityChecking
+from data_juicer.utils.lazy_loader import LazyLoader
 
 from ..base_op import OPERATORS, Mapper
 
-OP_NAME = 'fix_unicode_mapper'
+ftfy = LazyLoader('ftfy', 'ftfy')
 
-with AvailabilityChecking(['ftfy'], OP_NAME):
-    import ftfy
+OP_NAME = 'fix_unicode_mapper'
 
 
 @OPERATORS.register_module(OP_NAME)
 class FixUnicodeMapper(Mapper):
     """Mapper to fix unicode errors in text samples."""
 
+    _batched_op = True
+
     def __init__(self, normalization: str = None, *args, **kwargs):
         """
         Initialization method.
 
         :param normalization: the specified form of Unicode
-             normalization mode, which can be one of ['NFC',
-            'NFKC', 'NFD', and 'NFKD'], default 'NFC'
+             normalization mode, which can be one of
+             ['NFC', 'NFKC', 'NFD', and 'NFKD'], default 'NFC'.
         :param args: extra args
         :param kwargs: extra args
         """
@@ -33,7 +34,9 @@ class FixUnicodeMapper(Mapper):
                              'supported. Can only be one of '
                              '["NFC", "NFKC", "NFD", "NFKD"]')
 
-    def process(self, sample):
-        sample[self.text_key] = ftfy.fix_text(sample[self.text_key],
-                                              normalization=self.normalization)
-        return sample
+    def process_batched(self, samples):
+        samples[self.text_key] = [
+            ftfy.fix_text(text, normalization=self.normalization)
+            for text in samples[self.text_key]
+        ]
+        return samples

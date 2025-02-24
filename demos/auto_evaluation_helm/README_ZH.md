@@ -29,10 +29,10 @@
 docker pull nvcr.io/nvidia/pytorch:22.12-py3
 docker run --gpus all --ipc=host --ulimit memlock=-1 -it --rm -v /dataset:/workspace/data -v /code/data-juicer:/worksapce/data-juicer nvcr.io/nvidia/pytorch:22.12-py3
 ```
-dokcer 容器成功运行后在容器内运行安装脚本并登录 wandb：
+docker 容器成功运行后在容器内运行安装脚本并登录 wandb：
 
 ```shell
-cd /workspace/data-juicer/thirdparty
+cd /workspace/data-juicer/thirdparty/LLM_ecosystems
 ./setup_megatron.sh
 ./setup_helm.sh
 wandb login
@@ -49,7 +49,7 @@ docker commit <container_id> data-juicer-eval
 进入 Megatron-LM 目录并执行数据预处理脚本，该脚本会将 data-juicer 处理好的 jsonline（假设路径为 `/workspace/data/dataset.jsonl`）文件转化为二进制格式，并保存为 `/workspace.data/dataset_text_document.bin` 和 `/workspace.data/dataset_text_document.idx` 两个文件。
 
 ```shell
-cd /workspace/data-juicer/thirdparty/Megatron-LM
+cd /workspace/data-juicer/thirdparty/LLM_ecosystems/Megatron-LM
 python tools/preprocess_data.py              \
        --input /workspace/data/dataset.jsonl \
        --output-prefix dataset \
@@ -65,7 +65,7 @@ python tools/preprocess_data.py              \
 进入 Megatron-LM 目录并执行如下指令
 
 ```shell
-cd /workspace/data-juicer/thirdparty/Megatron-LM
+cd /workspace/data-juicer/thirdparty/LLM_ecosystems/Megatron-LM
 nohup bash /workspace/data-juicer/demos/auto_eval_helm/pretrain_example.sh > train.log 2>&1 &
 ```
 
@@ -78,10 +78,10 @@ nohup bash /workspace/data-juicer/demos/auto_eval_helm/pretrain_example.sh > tra
 
 ```shell
 cd /workspace/data-juicer/tools/eval
-python evaluator.py --config /workspace/data-juicer/demos/evalutor.yaml --begin-iteration 2000 --end-iteration 200000 --interation-interval 2000 --check-interval 30
+python evaluator.py --config /workspace/data-juicer/demos/evaluator.yaml --begin-iteration 2000 --end-iteration 200000 --interation-interval 2000 --check-interval 30
 ```
 
-该脚本会每隔 30 分钟检测一次 `/workspace/data/checkpoints/GPT2` 目录，并从 2000 iteration 开始每隔 2000 iteraion 对检查点执行一次 HELM 评测并将评测结果记录至 wandb，直到评测完 200000 iteraion 对应的检查点为止，您可以在 wandb 上查看已完成的评测结果，下图展示了模型训练到 140000 iteration 时 wandb 上的可视化展示结果。
+该脚本会每隔 30 分钟检测一次 `/workspace/data/checkpoints/GPT2` 目录，并从 2000 iteration 开始每隔 2000 iteration 对检查点执行一次 HELM 评测并将评测结果记录至 wandb，直到评测完 200000 iteration 对应的检查点为止，您可以在 wandb 上查看已完成的评测结果，下图展示了模型训练到 140000 iteration 时 wandb 上的可视化展示结果。
 
 ![训练过程中的评测结果展示](imgs/eval-02.png)
 

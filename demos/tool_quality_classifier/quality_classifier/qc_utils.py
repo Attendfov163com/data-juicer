@@ -14,7 +14,7 @@ from pyspark.sql.types import ArrayType, DoubleType, IntegerType, StringType
 
 from data_juicer.utils.cache_utils import DATA_JUICER_MODELS_CACHE
 from data_juicer.utils.model_utils import (MODEL_LINKS,
-                                           prepare_sentencepiece_model)
+                                           prepare_sentencepiece_for_lang)
 
 
 def init_spark():
@@ -38,7 +38,7 @@ def init_spark():
 def prepare_model(model_name, model_path=DATA_JUICER_MODELS_CACHE):
     udm = False
     if model_name not in ['gpt3', 'chinese', 'code']:
-        # use user-specific mdoel
+        # use user-specific model
         real_model_path = model_name
         udm = True
     else:
@@ -127,7 +127,7 @@ def get_keep_method_udf(keep_method):
 
 
 def tokenize_dataset(ds, tokenizer):
-    tkn = prepare_sentencepiece_model('', tokenizer)
+    tkn = prepare_sentencepiece_for_lang('', tokenizer)
     tokenizer_udf = udf(lambda text: tkn.encode_as_pieces(text),
                         ArrayType(StringType()))
     logger.info('Tokenize texts using specific tokenizer...')

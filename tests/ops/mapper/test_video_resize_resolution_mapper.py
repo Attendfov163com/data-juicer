@@ -1,13 +1,15 @@
 import os
 import unittest
 
-import ffmpeg
-from datasets import Dataset
+from data_juicer.core.data import NestedDataset as Dataset
 
 from data_juicer.ops.mapper.video_resize_resolution_mapper import \
     VideoResizeResolutionMapper
 from data_juicer.utils.constant import Fields
 from data_juicer.utils.unittest_utils import DataJuicerTestCaseBase
+from data_juicer.utils.lazy_loader import LazyLoader
+
+ffmpeg = LazyLoader('ffmpeg', 'ffmpeg')
 
 
 class VideoResizeResolutionMapperTest(DataJuicerTestCaseBase):
@@ -26,7 +28,6 @@ class VideoResizeResolutionMapperTest(DataJuicerTestCaseBase):
         for sample in dataset.to_list():
             cur_list = []
             for value in sample['videos']:
-                print(value)
                 probe = ffmpeg.probe(value)
                 video_stream = next((stream for stream in probe['streams']
                                      if stream['codec_type'] == 'video'), None)

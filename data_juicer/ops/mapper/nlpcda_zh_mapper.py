@@ -1,25 +1,27 @@
 from copy import deepcopy
 
 from loguru import logger
+from pydantic import PositiveInt
 
-from data_juicer.utils.availability_utils import AvailabilityChecking
+from data_juicer.utils.lazy_loader import LazyLoader
 from data_juicer.utils.logger_utils import HiddenPrints
 
 from ..base_op import OPERATORS, Mapper
 
-OP_NAME = 'nlpcda_zh_mapper'
+nlpcda = LazyLoader('nlpcda', 'nlpcda')
 
-with AvailabilityChecking(['nlpcda'], OP_NAME), HiddenPrints():
-    import nlpcda
+OP_NAME = 'nlpcda_zh_mapper'
 
 
 @OPERATORS.register_module(OP_NAME)
 class NlpcdaZhMapper(Mapper):
     """Mapper to simply augment samples in Chinese based on nlpcda library."""
 
+    _batched_op = True
+
     def __init__(self,
                  sequential: bool = False,
-                 aug_num: int = 1,
+                 aug_num: PositiveInt = 1,
                  keep_original_sample: bool = True,
                  replace_similar_word: bool = False,
                  replace_homophone_char: bool = False,
@@ -68,7 +70,6 @@ class NlpcdaZhMapper(Mapper):
         :param kwargs: extra args
         """
         super().__init__(*args, **kwargs)
-        self._batched_op = True  # this is a batched OP
 
         self.aug_num = aug_num
         if aug_num >= 10:
@@ -128,7 +129,7 @@ class NlpcdaZhMapper(Mapper):
                 self.aug_pipeline.append(
                     nlpcda.EquivalentChar(create_num=create_num))
 
-    def process(self, samples):
+    def process_batched(self, samples):
         # no augmentation methods are opened
         if len(self.aug_pipeline) == 0:
             if self.keep_original_sample:

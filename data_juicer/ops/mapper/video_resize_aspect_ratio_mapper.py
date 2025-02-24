@@ -2,17 +2,18 @@ import math
 import os
 from fractions import Fraction
 
-from data_juicer.utils.availability_utils import AvailabilityChecking
+from data_juicer.utils.constant import Fields
 from data_juicer.utils.file_utils import transfer_filename
+from data_juicer.utils.lazy_loader import LazyLoader
 from data_juicer.utils.logger_utils import HiddenPrints
-from data_juicer.utils.mm_utils import load_video
+from data_juicer.utils.mm_utils import close_video, load_video
 
 from ..base_op import OPERATORS, Mapper
 
-OP_NAME = 'video_resize_aspect_ratio_mapper'
+with HiddenPrints():
+    ffmpeg = LazyLoader('ffmpeg', 'ffmpeg')
 
-with AvailabilityChecking(['ffmpeg-python'], OP_NAME), HiddenPrints():
-    import ffmpeg
+OP_NAME = 'video_resize_aspect_ratio_mapper'
 
 
 def rescale(width, height, ori_ratio, min_ratio, max_ratio, strategy):
@@ -99,10 +100,14 @@ class VideoResizeAspectRatioMapper(Mapper):
         self.max_ratio = Fraction(str(max_ratio).replace(':', '/'))
         self.strategy = strategy
 
-    def process(self, sample):
+    def process_single(self, sample):
         # there is no video in this sample
         if self.video_key not in sample or not sample[self.video_key]:
+            sample[Fields.source_file] = []
             return sample
+
+        if Fields.source_file not in sample or not sample[Fields.source_file]:
+            sample[Fields.source_file] = sample[self.video_key]
 
         loaded_video_keys = sample[self.video_key]
         for index, video_key in enumerate(loaded_video_keys):
@@ -112,7 +117,7 @@ class VideoResizeAspectRatioMapper(Mapper):
             original_width = video.codec_context.width
             original_height = video.codec_context.height
             original_aspect_ratio = Fraction(original_width, original_height)
-            container.close()
+            close_video(container)
 
             if (original_aspect_ratio >= self.min_ratio
                     and original_aspect_ratio <= self.max_ratio):
@@ -138,6 +143,12 @@ class VideoResizeAspectRatioMapper(Mapper):
                 stream = stream.output(resized_video_key).global_args(*args)
                 stream.run()
             loaded_video_keys[index] = resized_video_key
+
+        # when the file is modified, its source file needs to be updated.
+        for i, value in enumerate(sample[self.video_key]):
+            if sample[Fields.source_file][i] != value:
+                if loaded_video_keys[i] != value:
+                    sample[Fields.source_file][i] = value
 
         sample[self.video_key] = loaded_video_keys
         return sample

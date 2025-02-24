@@ -1,12 +1,13 @@
 import copy
 import random
+from typing import Optional
 
 import numpy as np
-from jsonargparse.typing import PositiveInt
 from loguru import logger
+from pydantic import PositiveInt
 
-from data_juicer.utils.availability_utils import AvailabilityChecking
 from data_juicer.utils.constant import HashKeys
+from data_juicer.utils.lazy_loader import LazyLoader
 from data_juicer.utils.mm_utils import (SpecialTokens,
                                         insert_texts_after_placeholders,
                                         load_image, remove_non_special_tokens,
@@ -16,16 +17,9 @@ from data_juicer.utils.model_utils import get_model, prepare_model
 from ..base_op import OPERATORS, Mapper
 from ..op_fusion import LOADED_IMAGES
 
+simhash = LazyLoader('simhash', 'simhash')
+
 OP_NAME = 'image_captioning_mapper'
-
-with AvailabilityChecking(['torch', 'transformers', 'simhash-pybind'],
-                          OP_NAME):
-    import simhash  # noqa: F401
-    import torch
-    import transformers  # noqa: F401
-
-    # avoid hanging when calling model in multiprocessing
-    torch.set_num_threads(1)
 
 
 @OPERATORS.register_module(OP_NAME)
@@ -34,13 +28,17 @@ class ImageCaptioningMapper(Mapper):
     """Mapper to generate samples whose captions are generated based on
     another model and the figure."""
 
+    _accelerator = 'cuda'
+    _batched_op = True
+
     def __init__(self,
-                 hf_img2seq='Salesforce/blip2-opt-2.7b',
+                 hf_img2seq: str = 'Salesforce/blip2-opt-2.7b',
+                 trust_remote_code: bool = False,
                  caption_num: PositiveInt = 1,
                  keep_candidate_mode: str = 'random_any',
                  keep_original_sample: bool = True,
-                 prompt: str = None,
-                 prompt_key: str = None,
+                 prompt: Optional[str] = None,
+                 prompt_key: Optional[str] = None,
                  *args,
                  **kwargs):
         """
@@ -48,21 +46,27 @@ class ImageCaptioningMapper(Mapper):
 
         :param hf_img2seq: model name on huggingface to generate caption
         :param caption_num: how many candidate captions to generate
-        for each image
+            for each image
         :param keep_candidate_mode: retain strategy for the generated
-        $caption_num$ candidates.
+            $caption_num$ candidates.
+
             'random_any': Retain the random one from generated captions
+
             'similar_one_simhash': Retain the generated one that is most
                 similar to the original caption
+
             'all': Retain all generated captions by concatenation
-        Note: This is a batched_OP, whose input and output type are
+
+        Note:
+            This is a batched_OP, whose input and output type are
             both list. Suppose there are $N$ list of input samples, whose batch
             size is $b$, and denote caption_num as $M$.
             The number of total samples after generation is $2Nb$ when
             keep_original_sample is True and $Nb$ when keep_original_sample is
             False. For 'random_any' and 'similar_one_simhash' mode,
-             it's $(1+M)Nb$ for 'all' mode when keep_original_sample is True
-             and $MNb$ when keep_original_sample is False.
+            it's $(1+M)Nb$ for 'all' mode when keep_original_sample is True
+            and $MNb$ when keep_original_sample is False.
+
         :param keep_original_sample: whether to keep the original sample. If
             it's set to False, there will be only generated captions in the
             final datasets and the original captions will be removed. It's True
@@ -77,8 +81,10 @@ class ImageCaptioningMapper(Mapper):
         :param args: extra args
         :param kwargs: extra args
         """
+        kwargs.setdefault('mem_required', '16GB')
+
         super().__init__(*args, **kwargs)
-        self._batched_op = True
+
         if keep_candidate_mode not in [
                 'random_any', 'similar_one_simhash', 'all'
         ]:
@@ -88,15 +94,15 @@ class ImageCaptioningMapper(Mapper):
                 f'["random_any", "similar_one_simhash", "all"].')
 
         self.model_key = prepare_model(
-            model_type='huggingface', pretrained_model_name_or_path=hf_img2seq)
-        self._accelerator = 'cuda'
+            model_type='huggingface',
+            pretrained_model_name_or_path=hf_img2seq,
+            trust_remote_code=trust_remote_code)
         self.caption_num = caption_num
         self.keep_candidate_mode = keep_candidate_mode
         self.keep_original_sample = keep_original_sample
         self.prompt = prompt
         self.prompt_key = prompt_key
         self.extra_args = kwargs
-
         if keep_candidate_mode in ['random_any', 'similar_one_simhash']:
             self.num_newly_generated_samples = 1
         elif keep_candidate_mode in ['all']:
@@ -147,7 +153,7 @@ class ImageCaptioningMapper(Mapper):
         # the generated text will be placed following each SpecialTokens.img
         # and the original special tokens are kept in an order-preserving way.
 
-        model, processor = get_model(self.model_key, rank=rank)
+        model, processor = get_model(self.model_key, rank, self.use_cuda())
 
         # do generation for each image chunk by chunk
         for chunk in ori_sample[self.text_key].split(SpecialTokens.eoc):
@@ -185,7 +191,8 @@ class ImageCaptioningMapper(Mapper):
                                return_tensors='pt').to(model.device)
             for i in range(self.caption_num):
                 generated_ids = model.generate(**inputs,
-                                               do_sample=True).to(model.device)
+                                               max_new_tokens=128,
+                                               do_sample=True)
                 generated_text = processor.batch_decode(
                     generated_ids, skip_special_tokens=True)
                 generated_text_candidates_single_chunk[i] = generated_text
@@ -234,7 +241,6 @@ class ImageCaptioningMapper(Mapper):
             new_generated_text_per_chunk.extend(
                 generated_text_candidates_single_chunk)
         elif self.keep_candidate_mode == 'similar_one_simhash':
-            from simhash import num_differing_bits
 
             from ..deduplicator.document_simhash_deduplicator import \
                 DocumentSimhashDeduplicator
@@ -256,7 +262,7 @@ class ImageCaptioningMapper(Mapper):
                 for candidate_text in generated_text_candidates_single_chunk
             ]
             hamming_distances = [
-                num_differing_bits(ori_text_hash, generated_text_hash)
+                simhash.num_differing_bits(ori_text_hash, generated_text_hash)
                 for generated_text_hash in generated_text_hashes
             ]
             max_index = min(range(len(hamming_distances)),
@@ -265,14 +271,16 @@ class ImageCaptioningMapper(Mapper):
                 generated_text_candidates_single_chunk[max_index])
         return new_generated_text_per_chunk
 
-    def process(self, samples, rank=None):
+    def process_batched(self, samples, rank=None):
         """
-        Note: This is a batched_OP, whose input and output type are
+        Note:
+            This is a batched_OP, whose input and output type are
             both list. Suppose there are $N$ input sample list with batch
             size as $b$, and denote caption_num as $M$.
             the number of total samples after generation is $2Nb$
             for 'random_any' and 'similar_one' mode,
-             and $(1+M)Nb$ for 'all' mode.
+            and $(1+M)Nb$ for 'all' mode.
+
         :param samples:
         :return:
         """

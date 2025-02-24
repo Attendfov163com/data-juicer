@@ -1,13 +1,12 @@
 import os
 import unittest
 
-from datasets import Dataset
+from data_juicer.core.data import NestedDataset as Dataset
 
 from data_juicer.ops.filter.image_aesthetics_filter import \
     ImageAestheticsFilter
 from data_juicer.utils.constant import Fields
 from data_juicer.utils.unittest_utils import DataJuicerTestCaseBase
-
 
 class ImageAestheticsFilterTest(DataJuicerTestCaseBase):
 

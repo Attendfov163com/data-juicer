@@ -1,5 +1,5 @@
 import os
-from typing import List, Tuple, Union
+from typing import List, Union
 
 from datasets import Dataset, DatasetDict, concatenate_datasets, load_dataset
 from loguru import logger
@@ -27,7 +27,7 @@ class LocalFormatter(BaseFormatter):
         self,
         dataset_path: str,
         type: str,
-        suffixes: Union[str, List[str], Tuple[str]] = None,
+        suffixes: Union[str, List[str], None] = None,
         text_keys: List[str] = None,
         add_suffix=False,
         **kwargs,
@@ -228,7 +228,7 @@ def unify_format(
         if video_key in dataset.features:
             data_path_keys.append(video_key)
         if len(data_path_keys) == 0:
-            # no image/audios path list in dataset, no need to convert
+            # no image/audio/video path list in dataset, no need to convert
             return dataset
 
         if ds_dir == '':

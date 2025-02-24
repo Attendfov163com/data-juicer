@@ -1,10 +1,10 @@
 import sys
 
 import numpy as np
-from jsonargparse.typing import NonNegativeInt
 
 from data_juicer.utils.constant import Fields, StatsKeys
-from data_juicer.utils.mm_utils import load_data_with_context, load_video
+from data_juicer.utils.mm_utils import (close_video, load_data_with_context,
+                                        load_video)
 
 from ..base_op import OPERATORS, Filter
 from ..op_fusion import LOADED_VIDEOS
@@ -19,8 +19,8 @@ class VideoDurationFilter(Filter):
     """
 
     def __init__(self,
-                 min_duration: NonNegativeInt = 0,
-                 max_duration: NonNegativeInt = sys.maxsize,
+                 min_duration: float = 0,
+                 max_duration: float = sys.maxsize,
                  any_or_all: str = 'any',
                  *args,
                  **kwargs):
@@ -46,7 +46,7 @@ class VideoDurationFilter(Filter):
                              f'Can only be one of ["any", "all"].')
         self.any = (any_or_all == 'any')
 
-    def compute_stats(self, sample, context=False):
+    def compute_stats_single(self, sample, context=False):
         # check if it's computed already
         if StatsKeys.video_duration in sample[Fields.stats]:
             return sample
@@ -68,7 +68,7 @@ class VideoDurationFilter(Filter):
             video_durations[video_key] = round(stream.duration *
                                                stream.time_base)
             if not context:
-                video.close()
+                close_video(video)
 
         # get video durations
         sample[Fields.stats][StatsKeys.video_duration] = [
@@ -77,7 +77,7 @@ class VideoDurationFilter(Filter):
 
         return sample
 
-    def process(self, sample):
+    def process_single(self, sample):
         video_durations = sample[Fields.stats][StatsKeys.video_duration]
         keep_bools = np.array([
             self.min_duration <= duration <= self.max_duration
