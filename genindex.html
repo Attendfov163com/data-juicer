@@ -5,12 +5,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Index &mdash; data_juicer 1.3.0 documentation</title>
+  <title>Index &mdash; data_juicer 1.3.3 documentation</title>
       <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
       <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=e59714d7" />
 
   
-      <script src="_static/documentation_options.js?v=1f29e9d3"></script>
+      <script src="_static/documentation_options.js?v=28d163b9"></script>
       <script src="_static/doctools.js?v=9bcbadda"></script>
       <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="_static/js/theme.js"></script>
@@ -202,6 +202,8 @@
 </li>
         <li><a href="data_juicer.ops.filter.html#data_juicer.ops.filter.FlaggedWordFilter.__init__">(data_juicer.ops.filter.FlaggedWordFilter method)</a>
 </li>
+        <li><a href="data_juicer.ops.filter.html#data_juicer.ops.filter.GeneralFieldFilter.__init__">(data_juicer.ops.filter.GeneralFieldFilter method)</a>
+</li>
         <li><a href="data_juicer.ops.filter.html#data_juicer.ops.filter.ImageAestheticsFilter.__init__">(data_juicer.ops.filter.ImageAestheticsFilter method)</a>
 </li>
         <li><a href="data_juicer.ops.filter.html#data_juicer.ops.filter.ImageAspectRatioFilter.__init__">(data_juicer.ops.filter.ImageAspectRatioFilter method)</a>
@@ -318,7 +320,7 @@
 </li>
         <li><a href="data_juicer.ops.mapper.html#data_juicer.ops.mapper.DialogTopicDetectionMapper.__init__">(data_juicer.ops.mapper.DialogTopicDetectionMapper method)</a>
 </li>
-        <li><a href="data_juicer.ops.mapper.html#data_juicer.ops.mapper.ExpandMacroMapper.__init__">(data_juicer.ops.mapper.ExpandMacroMapper method)</a>
+        <li><a href="data_juicer.ops.mapper.html#data_juicer.ops.mapper.Difference_Area_Generator_Mapper.__init__">(data_juicer.ops.mapper.Difference_Area_Generator_Mapper method)</a>
 </li>
         <li><a href="data_juicer.ops.mapper.html#data_juicer.ops.mapper.ExtractEntityAttributeMapper.__init__">(data_juicer.ops.mapper.ExtractEntityAttributeMapper method)</a>
 </li>
@@ -331,6 +333,8 @@
         <li><a href="data_juicer.ops.mapper.html#data_juicer.ops.mapper.ExtractNicknameMapper.__init__">(data_juicer.ops.mapper.ExtractNicknameMapper method)</a>
 </li>
         <li><a href="data_juicer.ops.mapper.html#data_juicer.ops.mapper.ExtractSupportTextMapper.__init__">(data_juicer.ops.mapper.ExtractSupportTextMapper method)</a>
+</li>
+        <li><a href="data_juicer.ops.mapper.html#data_juicer.ops.mapper.ExtractTablesFromHtmlMapper.__init__">(data_juicer.ops.mapper.ExtractTablesFromHtmlMapper method)</a>
 </li>
         <li><a href="data_juicer.ops.mapper.html#data_juicer.ops.mapper.FixUnicodeMapper.__init__">(data_juicer.ops.mapper.FixUnicodeMapper method)</a>
 </li>
@@ -646,6 +650,8 @@
 </li>
         <li><a href="data_juicer.ops.filter.html#data_juicer.ops.filter.AudioSizeFilter.compute_stats_single">(data_juicer.ops.filter.AudioSizeFilter method)</a>
 </li>
+        <li><a href="data_juicer.ops.filter.html#data_juicer.ops.filter.GeneralFieldFilter.compute_stats_single">(data_juicer.ops.filter.GeneralFieldFilter method)</a>
+</li>
         <li><a href="data_juicer.ops.filter.html#data_juicer.ops.filter.ImageAestheticsFilter.compute_stats_single">(data_juicer.ops.filter.ImageAestheticsFilter method)</a>
 </li>
         <li><a href="data_juicer.ops.filter.html#data_juicer.ops.filter.ImageFaceCountFilter.compute_stats_single">(data_juicer.ops.filter.ImageFaceCountFilter method)</a>
@@ -835,6 +841,13 @@
 </li>
       </ul></li>
       <li>
+    data_juicer.ops.mapper.annotation
+
+      <ul>
+        <li><a href="data_juicer.ops.mapper.annotation.html#module-data_juicer.ops.mapper.annotation">module</a>
+</li>
+      </ul></li>
+      <li>
     data_juicer.ops.selector
 
       <ul>
@@ -947,10 +960,10 @@
       </ul></li>
       <li><a href="data_juicer.ops.mapper.html#data_juicer.ops.mapper.DialogSentimentIntensityMapper.DEFAULT_INTENSITY_PATTERN">DEFAULT_INTENSITY_PATTERN (data_juicer.ops.mapper.DialogSentimentIntensityMapper attribute)</a>
 </li>
-      <li><a href="data_juicer.ops.mapper.html#data_juicer.ops.mapper.DialogSentimentIntensityMapper.DEFAULT_INTENSITY_TEMPLATE">DEFAULT_INTENSITY_TEMPLATE (data_juicer.ops.mapper.DialogSentimentIntensityMapper attribute)</a>
-</li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="data_juicer.ops.mapper.html#data_juicer.ops.mapper.DialogSentimentIntensityMapper.DEFAULT_INTENSITY_TEMPLATE">DEFAULT_INTENSITY_TEMPLATE (data_juicer.ops.mapper.DialogSentimentIntensityMapper attribute)</a>
+</li>
       <li><a href="data_juicer.ops.mapper.html#data_juicer.ops.mapper.HumanPreferenceAnnotationMapper.DEFAULT_LABEL_CONFIG">DEFAULT_LABEL_CONFIG (data_juicer.ops.mapper.HumanPreferenceAnnotationMapper attribute)</a>
 </li>
       <li><a href="data_juicer.ops.mapper.html#data_juicer.ops.mapper.DialogIntentDetectionMapper.DEFAULT_LABELS_PATTERN">DEFAULT_LABELS_PATTERN (data_juicer.ops.mapper.DialogIntentDetectionMapper attribute)</a>
@@ -1109,6 +1122,8 @@
 </li>
       <li><a href="data_juicer.ops.mapper.html#data_juicer.ops.mapper.DialogTopicDetectionMapper">DialogTopicDetectionMapper (class in data_juicer.ops.mapper)</a>
 </li>
+      <li><a href="data_juicer.ops.mapper.html#data_juicer.ops.mapper.Difference_Area_Generator_Mapper">Difference_Area_Generator_Mapper (class in data_juicer.ops.mapper)</a>
+</li>
       <li><a href="data_juicer.analysis.html#data_juicer.analysis.DiversityAnalysis">DiversityAnalysis (class in data_juicer.analysis)</a>
 </li>
       <li><a href="data_juicer.core.data.html#data_juicer.core.data.DJDataset">DJDataset (class in data_juicer.core.data)</a>
@@ -1159,12 +1174,10 @@
         <li><a href="data_juicer.core.executor.html#data_juicer.core.executor.ExecutorFactory">(class in data_juicer.core.executor)</a>
 </li>
       </ul></li>
-      <li><a href="data_juicer.ops.mapper.html#data_juicer.ops.mapper.ExpandMacroMapper">ExpandMacroMapper (class in data_juicer.ops.mapper)</a>
+      <li><a href="data_juicer.core.html#data_juicer.core.Exporter.export">export() (data_juicer.core.Exporter method)</a>
 </li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="data_juicer.core.html#data_juicer.core.Exporter.export">export() (data_juicer.core.Exporter method)</a>
-</li>
       <li><a href="data_juicer.core.html#data_juicer.core.Exporter.export_compute_stats">export_compute_stats() (data_juicer.core.Exporter method)</a>
 </li>
       <li><a href="data_juicer.config.html#data_juicer.config.export_config">export_config() (in module data_juicer.config)</a>
@@ -1182,6 +1195,8 @@
       <li><a href="data_juicer.ops.mapper.html#data_juicer.ops.mapper.ExtractNicknameMapper">ExtractNicknameMapper (class in data_juicer.ops.mapper)</a>
 </li>
       <li><a href="data_juicer.ops.mapper.html#data_juicer.ops.mapper.ExtractSupportTextMapper">ExtractSupportTextMapper (class in data_juicer.ops.mapper)</a>
+</li>
+      <li><a href="data_juicer.ops.mapper.html#data_juicer.ops.mapper.ExtractTablesFromHtmlMapper">ExtractTablesFromHtmlMapper (class in data_juicer.ops.mapper)</a>
 </li>
   </ul></td>
 </tr></table>
@@ -1219,6 +1234,8 @@
 <h2 id="G">G</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="data_juicer.ops.filter.html#data_juicer.ops.filter.GeneralFieldFilter">GeneralFieldFilter (class in data_juicer.ops.filter)</a>
+</li>
       <li><a href="data_juicer.ops.mapper.html#data_juicer.ops.mapper.GenerateQAFromExamplesMapper">GenerateQAFromExamplesMapper (class in data_juicer.ops.mapper)</a>
 </li>
       <li><a href="data_juicer.ops.mapper.html#data_juicer.ops.mapper.GenerateQAFromTextMapper">GenerateQAFromTextMapper (class in data_juicer.ops.mapper)</a>
@@ -1447,6 +1464,8 @@
 </li>
         <li><a href="data_juicer.ops.mapper.html#module-data_juicer.ops.mapper">data_juicer.ops.mapper</a>
 </li>
+        <li><a href="data_juicer.ops.mapper.annotation.html#module-data_juicer.ops.mapper.annotation">data_juicer.ops.mapper.annotation</a>
+</li>
         <li><a href="data_juicer.ops.selector.html#module-data_juicer.ops.selector">data_juicer.ops.selector</a>
 </li>
         <li><a href="data_juicer.tools.html#module-data_juicer.tools">data_juicer.tools</a>
@@ -1661,8 +1680,6 @@
 </li>
         <li><a href="data_juicer.ops.mapper.html#data_juicer.ops.mapper.CleanLinksMapper.process_batched">(data_juicer.ops.mapper.CleanLinksMapper method)</a>
 </li>
-        <li><a href="data_juicer.ops.mapper.html#data_juicer.ops.mapper.ExpandMacroMapper.process_batched">(data_juicer.ops.mapper.ExpandMacroMapper method)</a>
-</li>
         <li><a href="data_juicer.ops.mapper.html#data_juicer.ops.mapper.ExtractEventMapper.process_batched">(data_juicer.ops.mapper.ExtractEventMapper method)</a>
 </li>
         <li><a href="data_juicer.ops.mapper.html#data_juicer.ops.mapper.FixUnicodeMapper.process_batched">(data_juicer.ops.mapper.FixUnicodeMapper method)</a>
@@ -1753,6 +1770,8 @@
 </li>
         <li><a href="data_juicer.ops.filter.html#data_juicer.ops.filter.AudioSizeFilter.process_single">(data_juicer.ops.filter.AudioSizeFilter method)</a>
 </li>
+        <li><a href="data_juicer.ops.filter.html#data_juicer.ops.filter.GeneralFieldFilter.process_single">(data_juicer.ops.filter.GeneralFieldFilter method)</a>
+</li>
         <li><a href="data_juicer.ops.filter.html#data_juicer.ops.filter.ImageAestheticsFilter.process_single">(data_juicer.ops.filter.ImageAestheticsFilter method)</a>
 </li>
         <li><a href="data_juicer.ops.filter.html#data_juicer.ops.filter.ImageFaceCountFilter.process_single">(data_juicer.ops.filter.ImageFaceCountFilter method)</a>
@@ -1833,6 +1852,8 @@
 </li>
         <li><a href="data_juicer.ops.mapper.html#data_juicer.ops.mapper.DialogTopicDetectionMapper.process_single">(data_juicer.ops.mapper.DialogTopicDetectionMapper method)</a>
 </li>
+        <li><a href="data_juicer.ops.mapper.html#data_juicer.ops.mapper.Difference_Area_Generator_Mapper.process_single">(data_juicer.ops.mapper.Difference_Area_Generator_Mapper method)</a>
+</li>
         <li><a href="data_juicer.ops.mapper.html#data_juicer.ops.mapper.ExtractEntityAttributeMapper.process_single">(data_juicer.ops.mapper.ExtractEntityAttributeMapper method)</a>
 </li>
         <li><a href="data_juicer.ops.mapper.html#data_juicer.ops.mapper.ExtractEntityRelationMapper.process_single">(data_juicer.ops.mapper.ExtractEntityRelationMapper method)</a>
@@ -1842,6 +1863,8 @@
         <li><a href="data_juicer.ops.mapper.html#data_juicer.ops.mapper.ExtractNicknameMapper.process_single">(data_juicer.ops.mapper.ExtractNicknameMapper method)</a>
 </li>
         <li><a href="data_juicer.ops.mapper.html#data_juicer.ops.mapper.ExtractSupportTextMapper.process_single">(data_juicer.ops.mapper.ExtractSupportTextMapper method)</a>
+</li>
+        <li><a href="data_juicer.ops.mapper.html#data_juicer.ops.mapper.ExtractTablesFromHtmlMapper.process_single">(data_juicer.ops.mapper.ExtractTablesFromHtmlMapper method)</a>
 </li>
         <li><a href="data_juicer.ops.mapper.html#data_juicer.ops.mapper.GenerateQAFromExamplesMapper.process_single">(data_juicer.ops.mapper.GenerateQAFromExamplesMapper method)</a>
 </li>
